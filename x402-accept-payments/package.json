@@ -4,9 +4,9 @@
   "description": "Example merchant server for accepting x402 (atum-escrow) payments",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n facilitator,merchant -c cyan,green \"ts-node src/mock-facilitator.ts\" \"ts-node src/merchant.ts\"",
-    "merchant": "ts-node src/merchant.ts",
-    "facilitator": "ts-node src/mock-facilitator.ts",
+    "dev": "concurrently -n facilitator,merchant -c cyan,green \"tsx src/mock-facilitator.ts\" \"tsx src/merchant.ts\"",
+    "merchant": "tsx src/merchant.ts",
+    "facilitator": "tsx src/mock-facilitator.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,7 +17,7 @@
     "@types/express": "^4.17.0",
     "@types/node": "^22.0.0",
     "concurrently": "^9.0.0",
-    "ts-node": "^10.9.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.0.0"
   }
 }
