@@ -7,11 +7,11 @@ The merchant gates a route behind payment: unauthenticated requests receive an H
 ## How it works
 
 1. A client hits `GET /paid` without a payment credential.
-2. The merchant returns `402 Payment Required` with its accepted payment options.
-3. The client signs a payment credential and retries with an `X-Payment` header.
+2. The merchant returns `402 Payment Required` with its accepted payment options in a `PAYMENT-REQUIRED` header (mirrored in the JSON body for readability).
+3. The client signs a payment credential and retries with a `PAYMENT-SIGNATURE` header.
 4. The merchant calls `/verify` on the facilitator — validates the credential without moving funds.
 5. The merchant calls `/settle` — funds are moved on-chain.
-6. The merchant returns `200 OK` with the protected resource and a `X-Payment-Response` header.
+6. The merchant returns `200 OK` with the protected resource and a `PAYMENT-RESPONSE` header carrying the settlement receipt.
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ With a mock payment credential:
 PAYMENT=$(echo '{"x402Version":2,"accepted":{"scheme":"atum-escrow"},"payload":{"paymentRequest":{}}}' | base64)
 
 curl -i http://localhost:4020/paid \
-  -H "X-Payment: $PAYMENT"
+  -H "PAYMENT-SIGNATURE: $PAYMENT"
 ```
 
 ## Going to testnet / mainnet

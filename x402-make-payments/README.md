@@ -5,9 +5,9 @@ An example x402 client that programmatically pays for an HTTP-gated resource usi
 The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` response.
-2. Reads the payment requirements from the `402` body.
+2. Reads the payment requirements from the `PAYMENT-REQUIRED` header.
 3. Signs a Permit2 authorization for the source token.
-4. Retries the request with the signed credential in `X-Payment`.
+4. Retries the request with the signed credential in a `PAYMENT-SIGNATURE` header.
 5. The merchant verifies and settles the payment, then returns the resource.
 
 ## Pair with x402-accept-payments
@@ -27,7 +27,7 @@ This example is designed to work alongside [`x402-accept-payments`](../x402-acce
 npm install
 ```
 
-> The `@atum-x402` packages are published to GitHub Packages. The `.npmrc` in this directory already points `@atum-x402:registry` there — no token is needed for public packages.
+> `@atumlabs/x402-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](https://calendly.com/pramod-hs-atumlabs/30min) for access, then run `npm login` before `npm install`.
 
 ### 2. Configure environment
 
@@ -55,8 +55,8 @@ Expected output when paired with the mock merchant:
 Requesting http://localhost:4020/paid …
 Status: 200
 {
-  "message": "Payment received. Here is your resource.",
-  "payer": "0x..."
+  "message": "Access granted.",
+  "data": "Your premium content here."
 }
 ```
 

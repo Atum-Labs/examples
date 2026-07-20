@@ -4,8 +4,42 @@ import express, { Request, Response } from "express";
 const PORT = Number(process.env.PORT ?? 4020);
 const FACILITATOR_URL = process.env.FACILITATOR_URL ?? "http://localhost:8091";
 
+// The exact amount the merchant receives on the destination chain (atomic units).
+const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "10000000";
+
+// Markup over FULFILLMENT_AMOUNT, in basis points (100 bps = 1%). It is added on
+// top of the fulfillment amount to derive the source-chain spend cap, and covers
+// settlement fees and cross-chain conversion. Default 0 for a like-for-like demo.
+const MARKUP_BPS = BigInt(process.env.MARKUP_BPS || "0");
+
+// The maximum the payer authorizes on the source chain = fulfillment amount +
+// markup. Atum converts this to the exact FULFILLMENT_AMOUNT on the destination
+// chain; anything above the fulfillment amount covers fees.
+const SOURCE_MAX_AMOUNT = (
+  (BigInt(FULFILLMENT_AMOUNT) * (10000n + MARKUP_BPS)) / 10000n
+).toString();
+
 // ---------------------------------------------------------------------------
-// Types — shapes match the x402 Facilitator API (atum-escrow scheme)
+// x402 v2 header names. Each value is base64(JSON) — standard base64, no prefix.
+//   PAYMENT-REQUIRED  — response header on the 402 challenge (server → client)
+//   PAYMENT-SIGNATURE — request header on the paid retry     (client → server)
+//   PAYMENT-RESPONSE  — response header on the 200           (server → client)
+// The deprecated x402 v1 names (X-PAYMENT / X-PAYMENT-RESPONSE) are still read
+// on the request for backwards compatibility.
+// ---------------------------------------------------------------------------
+
+const HEADER_PAYMENT_REQUIRED = "PAYMENT-REQUIRED";
+const HEADER_PAYMENT_SIGNATURE = "PAYMENT-SIGNATURE";
+const HEADER_PAYMENT_RESPONSE = "PAYMENT-RESPONSE";
+
+const encodeHeader = (value: unknown): string =>
+  Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+
+const decodeHeader = <T>(value: string): T =>
+  JSON.parse(Buffer.from(value, "base64").toString("utf8")) as T;
+
+// ---------------------------------------------------------------------------
+// Types — shapes match x402 v2 and the Facilitator API (atum-escrow scheme).
 // ---------------------------------------------------------------------------
 
 interface PaymentRequirements {
@@ -30,9 +64,32 @@ interface PaymentRequirements {
   };
 }
 
+interface ResourceInfo {
+  url: string;
+  description?: string;
+  mimeType?: string;
+}
+
+// Encoded into the PAYMENT-REQUIRED header on the 402.
+interface PaymentRequired {
+  x402Version: 2;
+  resource: ResourceInfo;             // required by the spec — describes the gated resource
+  accepts: PaymentRequirements[];     // one entry per payment option offered
+  error?: string;
+}
+
+// Decoded from the PAYMENT-SIGNATURE header on the retry. The signed Atum
+// PaymentRequest lives at `payload.paymentRequest`.
+interface PaymentPayload {
+  x402Version: 2;
+  accepted: PaymentRequirements;
+  payload: { paymentRequest: unknown };
+  resource?: ResourceInfo;
+}
+
 interface FacilitatorRequest {
   x402Version: 2;
-  paymentPayload: unknown;       // AtumEscrowPayload — signed by the payer
+  paymentPayload: PaymentPayload;
   paymentRequirements: PaymentRequirements;
 }
 
@@ -61,7 +118,7 @@ const PAYMENT_REQUIREMENTS: PaymentRequirements = {
   network: process.env.SOURCE_NETWORK ?? "eip155:8453",
   asset: process.env.SOURCE_ASSET ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   payTo: process.env.ESCROW_CONTRACT ?? "0x0000000000000000000000000000000000000001",
-  amount: process.env.AMOUNT ?? "10000000",
+  amount: SOURCE_MAX_AMOUNT,
   maxTimeoutSeconds: 60,
   extra: {
     atum: {
@@ -70,7 +127,7 @@ const PAYMENT_REQUIREMENTS: PaymentRequirements = {
         asset: process.env.DEST_ASSET ?? "0x52e52f345139e57b87d288c9ea794bb3fbe591c3",
         address: process.env.DEST_ADDRESS ?? "0x0000000000000000000000000000000000000002",
       },
-      fulfillmentAmount: process.env.FULFILLMENT_AMOUNT ?? "10000000",
+      fulfillmentAmount: FULFILLMENT_AMOUNT,
       escrow: process.env.ESCROW_CONTRACT ?? "0x0000000000000000000000000000000000000001",
       fulfillmentProxy: process.env.FULFILLMENT_PROXY ?? "0x0000000000000000000000000000000000000003",
       reserver: process.env.RESERVER ?? "0x0000000000000000000000000000000000000004",
@@ -83,7 +140,7 @@ const PAYMENT_REQUIREMENTS: PaymentRequirements = {
 };
 
 // ---------------------------------------------------------------------------
-// Facilitator calls
+// Facilitator calls (JSON over HTTP — unaffected by the x402 wire headers).
 // ---------------------------------------------------------------------------
 
 async function verify(body: FacilitatorRequest): Promise<VerifyResponse> {
@@ -114,23 +171,34 @@ const app = express();
 app.use(express.json());
 
 app.get("/paid", async (req: Request, res: Response) => {
-  const paymentHeader = req.headers["x-payment"] as string | undefined;
+  // Express lower-cases header names. Read the v2 header, then fall back to v1.
+  const paymentHeader = (req.headers["payment-signature"] ??
+    req.headers["x-payment"]) as string | undefined;
 
-  // No payment credential — return 402 with what we accept.
+  const resource: ResourceInfo = {
+    url: `${req.protocol}://${req.get("host") ?? `localhost:${PORT}`}${req.originalUrl}`,
+    description: "Example premium resource",
+  };
+
+  // No payment credential — issue the 402 challenge with what we accept.
   if (!paymentHeader) {
-    res.status(402).json({
-      x402Version: 2,
-      accepts: [PAYMENT_REQUIREMENTS],
-    });
+    const challenge: PaymentRequired = { x402Version: 2, resource, accepts: [PAYMENT_REQUIREMENTS] };
+    console.log("→ 402: no payment credential, issuing challenge");
+    res
+      .status(402)
+      .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
+      .json(challenge); // body mirrors the header so `curl` shows the options
     return;
   }
 
-  // Parse the payment credential from the header.
-  let paymentPayload: unknown;
+  // Decode the signed payment payload from the header.
+  let paymentPayload: PaymentPayload;
   try {
-    paymentPayload = JSON.parse(Buffer.from(paymentHeader, "base64").toString("utf8"));
+    paymentPayload = decodeHeader<PaymentPayload>(paymentHeader);
   } catch {
-    res.status(400).json({ error: "Invalid X-Payment header — expected base64-encoded JSON." });
+    res.status(400).json({
+      error: `Invalid ${HEADER_PAYMENT_SIGNATURE} header — expected base64-encoded JSON.`,
+    });
     return;
   }
 
@@ -150,11 +218,14 @@ app.get("/paid", async (req: Request, res: Response) => {
   }
 
   if (!verified.isValid) {
-    res.status(402).json({
+    const challenge: PaymentRequired = {
       x402Version: 2,
-      error: verified.invalidReason ?? "Payment credential is not valid.",
+      resource,
       accepts: [PAYMENT_REQUIREMENTS],
-    });
+      error: verified.invalidReason ?? "Payment credential is not valid.",
+    };
+    console.log(`→ 402: verify rejected (${challenge.error})`);
+    res.status(402).set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge)).json(challenge);
     return;
   }
 
@@ -168,20 +239,20 @@ app.get("/paid", async (req: Request, res: Response) => {
   }
 
   if (!settled.success) {
-    res.status(402).json({
+    const challenge: PaymentRequired = {
       x402Version: 2,
-      error: settled.errorReason ?? "Settlement failed.",
+      resource,
       accepts: [PAYMENT_REQUIREMENTS],
-    });
+      error: settled.errorReason ?? "Settlement failed.",
+    };
+    console.log(`→ 402: settle failed (${challenge.error})`);
+    res.status(402).set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge)).json(challenge);
     return;
   }
 
-  // Payment confirmed — return the protected resource.
-  res.setHeader("X-Payment-Response", JSON.stringify({
-    x402Version: 2,
-    transaction: settled.transaction,
-    network: settled.network,
-  }));
+  // Payment confirmed — attach the settlement receipt and return the resource.
+  console.log(`→ 200: settled (tx ${settled.transaction})`);
+  res.setHeader(HEADER_PAYMENT_RESPONSE, encodeHeader(settled));
   res.json({ message: "Access granted.", data: "Your premium content here." });
 });
 

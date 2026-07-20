@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { ethers } from "ethers";
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
-import { registerAtumEscrowScheme } from "@atum-x402/atum-escrow/client";
+import { registerAtumEscrowScheme } from "@atumlabs/x402-atum-escrow/client";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL } = process.env;
 
