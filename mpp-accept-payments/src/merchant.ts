@@ -4,6 +4,7 @@ import { Mppx } from "mppx/server";
 import {
   registerServer,
   buildChargeRequest,
+  corridorFromDefaults,
   type AtumEscrowCorridor,
   type PaymentSubmitter,
   type FulfillmentConfirmation,
@@ -27,68 +28,85 @@ const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "100000"; // 0.10 (
 const USE_STUB_SUBMITTER = (process.env.USE_STUB_SUBMITTER ?? "true") !== "false";
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gateway-testnet.atumlabs.xyz";
 
-// ---------------------------------------------------------------------------
-// Corridor — what the merchant receives and which source it accepts payment from.
-// Replace the placeholder addresses with the values Atum provides for your corridor,
-// or build it from the gateway at startup with `corridorFromDefaults(gateway, {...})`.
-// ---------------------------------------------------------------------------
+// What the merchant receives, the source it accepts, and the pricing/deadline budgets.
+// The corridor's contract addresses (escrow, reserver, releaser, fulfillment proxy,
+// verifier) are NOT configured here: against a real gateway they're fetched from
+// `/defaults` by `corridorFromDefaults`; the offline stub uses built-in placeholders.
+const DEST_NETWORK = process.env.DEST_NETWORK ?? "eip155:11142220"; // Celo Sepolia
+const DEST_ASSET = process.env.DEST_ASSET ?? "0x0000000000000000000000000000000000000002";
+const DEST_ACCOUNT = process.env.DEST_ADDRESS ?? "0x0000000000000000000000000000000000000003";
+const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:421614"; // Arbitrum Sepolia
+const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x0000000000000000000000000000000000000001";
+// Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
+const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
+const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "60");
+const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "600");
 
-const corridor: AtumEscrowCorridor = {
-  destination: {
-    network: process.env.DEST_NETWORK ?? "eip155:11142220", // Celo Sepolia
-    asset: process.env.DEST_ASSET ?? "0x0000000000000000000000000000000000000002",
-    account: process.env.DEST_ADDRESS ?? "0x0000000000000000000000000000000000000003",
-  },
-  fulfillmentProxy: process.env.FULFILLMENT_PROXY ?? "0x0000000000000000000000000000000000000007",
-  // Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
-  markupBps: Number(process.env.MARKUP_BPS ?? "300"),
-  quoteDeadlineSeconds: Number(process.env.QUOTE_DEADLINE_SECONDS ?? "60"),
-  fulfillmentDeadlineSeconds: Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "600"),
-  sources: [
-    {
-      network: process.env.SOURCE_NETWORK ?? "eip155:421614", // Arbitrum Sepolia
-      asset: process.env.SOURCE_ASSET ?? "0x0000000000000000000000000000000000000001",
-      escrow: process.env.ESCROW ?? "0x0000000000000000000000000000000000000004",
-      reserver: process.env.RESERVER ?? "0x0000000000000000000000000000000000000005",
-      releaser: process.env.RELEASER ?? "0x0000000000000000000000000000000000000006",
-      fulfillmentVerifierEndpoint: process.env.VERIFIER_ENDPOINT ?? "https://verifier.example/verify",
-    },
-  ],
+const destination = { network: DEST_NETWORK, asset: DEST_ASSET, account: DEST_ACCOUNT };
+const budgets = {
+  markupBps: MARKUP_BPS,
+  quoteDeadlineSeconds: QUOTE_DEADLINE_SECONDS,
+  fulfillmentDeadlineSeconds: FULFILLMENT_DEADLINE_SECONDS,
 };
-const source = corridor.sources[0];
 
-// ---------------------------------------------------------------------------
-// PaymentSubmitter — hands the verified PaymentRequest to Atum for settlement.
-// MPP has no separate facilitator: the merchant server verifies the credential
-// in-process, then submits it here.
-// ---------------------------------------------------------------------------
+// A static corridor for the offline demo. The escrow/role/proxy/verifier values are
+// placeholders the stub submitter accepts — real ones come from the gateway (see setup()).
+function stubCorridor(): AtumEscrowCorridor {
+  return {
+    destination,
+    fulfillmentProxy: "0x0000000000000000000000000000000000000007",
+    ...budgets,
+    sources: [
+      {
+        network: SOURCE_NETWORK,
+        asset: SOURCE_ASSET,
+        escrow: "0x0000000000000000000000000000000000000004",
+        reserver: "0x0000000000000000000000000000000000000005",
+        releaser: "0x0000000000000000000000000000000000000006",
+        fulfillmentVerifierEndpoint: "https://verifier.example/verify",
+      },
+    ],
+  };
+}
 
 // Local stub: returns a canned confirmation so the full 402 → pay → 200 flow runs
-// without a gateway or on-chain funds. It settles nothing — it only lets you see the
-// protocol end to end locally.
-const stubSubmitter: PaymentSubmitter = {
-  async submit(request: PaymentRequest) {
-    const confirmation: FulfillmentConfirmation = {
-      payment_id: "pay_stub_00000000000000000000000000000000",
-      request_id: request.request_id ?? "req_stub",
-      fulfillment_timestamp: new Date().toISOString(),
-      source_chain_id: source.network,
-      destination_chain_id: corridor.destination.network,
-      source_tx_hash: `0x${"11".repeat(32)}`,
-      destination_tx_hash: `0x${"22".repeat(32)}`,
-    };
-    return { payment_id: confirmation.payment_id, fulfillment_confirmation: confirmation };
-  },
-};
+// without a gateway or on-chain funds. It settles nothing.
+function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
+  return {
+    async submit(request: PaymentRequest) {
+      const confirmation: FulfillmentConfirmation = {
+        payment_id: "pay_stub_00000000000000000000000000000000",
+        request_id: request.request_id ?? "req_stub",
+        fulfillment_timestamp: new Date().toISOString(),
+        source_chain_id: corridor.sources[0].network,
+        destination_chain_id: corridor.destination.network,
+        source_tx_hash: `0x${"11".repeat(32)}`,
+        destination_tx_hash: `0x${"22".repeat(32)}`,
+      };
+      return { payment_id: confirmation.payment_id, fulfillment_confirmation: confirmation };
+    },
+  };
+}
 
-// Real settlement: forward the request to an Atum Payment Gateway. Needs a funded,
-// Permit2-approved payer and a live corridor. `submitPayment` blocks on the gateway's
-// synchronous settlement window; production servers may need to poll `getPaymentStatus`
-// when the confirmation is not ready yet (see the SDK guide).
-async function createRealSubmitter(): Promise<PaymentSubmitter> {
+// Resolve the corridor and the submitter for the chosen mode. MPP has no separate
+// facilitator: the merchant verifies in-process and submits through the submitter.
+async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: PaymentSubmitter }> {
+  if (USE_STUB_SUBMITTER) {
+    const corridor = stubCorridor();
+    return { corridor, submitter: stubSubmitter(corridor) };
+  }
+
+  // Real settlement: one gateway client both discovers the corridor addresses and
+  // submits the payment. `submitPayment` blocks on the gateway's synchronous window;
+  // production servers may need to poll `getPaymentStatus` (see the SDK guide).
   const { PaymentGatewayClient } = await import("@atumlabs/payment-gateway-client");
   const gateway = new PaymentGatewayClient({ BASE: GATEWAY_URL });
-  return {
+  const corridor = await corridorFromDefaults(gateway, {
+    destination,
+    sources: [{ network: SOURCE_NETWORK, asset: SOURCE_ASSET }],
+    ...budgets,
+  });
+  const submitter: PaymentSubmitter = {
     async submit(request) {
       const res = await gateway.payments.submitPayment({ requestBody: request as never });
       return {
@@ -97,6 +115,7 @@ async function createRealSubmitter(): Promise<PaymentSubmitter> {
       };
     },
   };
+  return { corridor, submitter };
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +123,8 @@ async function createRealSubmitter(): Promise<PaymentSubmitter> {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const submitter = USE_STUB_SUBMITTER ? stubSubmitter : await createRealSubmitter();
+  const { corridor, submitter } = await setup();
+  const source = corridor.sources[0];
 
   // registerServer takes no corridor: it trusts the HMAC-bound challenge that mppx
   // verifies before verify() runs. One registration serves every corridor you advertise.

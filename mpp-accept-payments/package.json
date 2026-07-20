@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "serve": "tsx src/merchant.ts",
+    "dev": "tsx src/merchant.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

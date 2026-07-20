@@ -2,23 +2,22 @@
 
 An example merchant server that accepts payments over the [Machine Payments Protocol (MPP)](https://mpp.dev) using Atum's `atum-escrow` payment method.
 
-The server gates an HTTP route (`GET /paid-resource`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
+The merchant gates a route (`GET /paid-resource`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
 
 ## How it works
 
-1. A client requests `GET /paid-resource` without a credential.
+1. A client hits `GET /paid-resource` without a payment credential.
 2. `mppx` returns `402 Payment Required` with an `atum-escrow` challenge (the corridor terms) in a `WWW-Authenticate: Payment` header.
-3. The client builds and signs a payment and retries with an `Authorization: Payment` credential.
-4. `mppx` calls this method's `verify()`, which checks the signature and terms locally, then hands the request to your `PaymentSubmitter`.
-5. The server returns `200 OK` with the resource and a `Payment-Receipt` header.
+3. The client signs a payment credential and retries with an `Authorization: Payment` header.
+4. `mppx` calls this method's `verify()` — it checks the signature and terms locally, then hands the request to your `PaymentSubmitter`.
+5. The merchant returns `200 OK` with the protected resource and a `Payment-Receipt` header.
 
-By default this example uses a **stub submitter** that returns a canned confirmation, so you can run the full flow locally with no gateway and no funds. Point it at a real Atum Payment Gateway when you're ready to settle for real (see [Going to testnet](#going-to-testnet)).
+By default this example uses a **stub submitter** that returns a canned confirmation, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
 
 ## Prerequisites
 
-- Node.js 20+ (includes npm)
-
-> The `@atum-labs/mppx-atum-escrow` method package is served from GitHub Packages while it is in early access; the `.npmrc` in this directory points the `@atum-labs` scope there. It will move to the public npm registry (`@atumlabs/mppx-atum-escrow`) at release.
+- Node.js 20+
+- npm
 
 ## Quickstart
 
@@ -28,7 +27,9 @@ By default this example uses a **stub submitter** that returns a canned confirma
 npm install
 ```
 
-### 2. Configure
+> The `@atum-labs/mppx-atum-escrow` method package is served from GitHub Packages while it is in early access; the `.npmrc` in this directory points the `@atum-labs` scope there. It moves to the public npm registry (`@atumlabs/mppx-atum-escrow`) at release.
+
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
@@ -36,10 +37,10 @@ cp .env.example .env
 
 The defaults run against the stub submitter — no changes needed to try the flow locally.
 
-### 3. Run
+### 3. Start the server
 
 ```bash
-npm run serve
+npm run dev
 ```
 
 You should see:
@@ -49,13 +50,17 @@ MPP merchant listening on http://localhost:4030/paid-resource
 Submitter: stub (local, no funds)
 ```
 
-Pair it with [`mpp-make-payments`](../mpp-make-payments) to drive a payment through it.
+### 4. Try a payment
 
-## Going to testnet
+Drive a payment through it with the [`mpp-make-payments`](../mpp-make-payments) client — a `curl` can't easily produce the signed credential MPP expects. Start this server, then run `npm run pay` there; you should get a `200` with a `Payment-Receipt` header.
+
+## Going to testnet / mainnet
 
 1. Set `USE_STUB_SUBMITTER=false` and `GATEWAY_URL` to an Atum-provided Payment Gateway.
-2. Fill in the real corridor values (`DEST_*`, `SOURCE_*`, `ESCROW`, `RESERVER`, `RELEASER`, `FULFILLMENT_PROXY`, `VERIFIER_ENDPOINT`) — or replace the static corridor in `src/merchant.ts` with `corridorFromDefaults(gateway, {...})`, which fetches them for you.
+2. Set your `DEST_*` and `SOURCE_*` (chains, tokens, receive address). The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
 3. The payer must hold the source token and have approved the source escrow (Permit2) — see the `mpp-make-payments` example.
+
+> With a real gateway, `verify()` holds the inbound request open until settlement completes (the Payment Gateway's synchronous window — a few seconds). Make sure your server/proxy read timeout and the client's request timeout both exceed it, or a successful payment may never be served.
 
 ## Project structure
 
