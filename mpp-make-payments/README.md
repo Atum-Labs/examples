@@ -26,7 +26,7 @@ This example is designed to work alongside [`mpp-accept-payments`](../mpp-accept
 npm install
 ```
 
-> The `@atum-labs/mppx-atum-escrow` method package is served from GitHub Packages while it is in early access; the `.npmrc` in this directory points the `@atum-labs` scope there. It moves to the public npm registry (`@atumlabs/mppx-atum-escrow`) at release.
+> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](mailto:support@atumlabs.xyz) for access, then run `npm login` before `npm install`.
 
 ### 2. Configure environment
 
@@ -63,7 +63,7 @@ Payment-Receipt header: present
 ## Going to testnet or mainnet
 
 1. Point `MERCHANT_URL` at a merchant settling through a real Atum Payment Gateway.
-2. Fund the payer wallet with the source token. Set `RPC_URL` and the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atum-labs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
+2. Fund the payer wallet with the source token. Set `RPC_URL` and the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atumlabs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
 
 ## Further reading
 

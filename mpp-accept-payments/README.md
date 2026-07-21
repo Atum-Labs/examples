@@ -27,7 +27,7 @@ By default this example uses a **stub submitter** that returns a canned confirma
 npm install
 ```
 
-> The `@atum-labs/mppx-atum-escrow` method package is served from GitHub Packages while it is in early access; the `.npmrc` in this directory points the `@atum-labs` scope there. It moves to the public npm registry (`@atumlabs/mppx-atum-escrow`) at release.
+> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](mailto:support@atumlabs.xyz) for access, then run `npm login` before `npm install`.
 
 ### 2. Configure environment
 
