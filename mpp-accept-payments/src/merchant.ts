@@ -103,6 +103,15 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
   };
 }
 
+// How often to re-check a payment that is still settling past the gateway's
+// synchronous window. The overall cap is the corridor's own fulfillment deadline
+// (see the poll loop in the real submitter below).
+const POLL_INTERVAL_MS = 3000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Resolve the corridor and the submitter for the chosen mode. MPP has no separate
 // facilitator: the merchant verifies in-process and submits through the submitter.
 async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: PaymentSubmitter }> {
@@ -112,8 +121,7 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   }
 
   // Real settlement: one gateway client both discovers the corridor addresses and
-  // submits the payment. `submitPayment` blocks on the gateway's synchronous window;
-  // production servers may need to poll `getPaymentStatus` (see the SDK guide).
+  // submits the payment.
   const { PaymentGatewayClient } = await import("@atumlabs/payment-gateway-client");
   const gateway = new PaymentGatewayClient({ BASE: GATEWAY_URL });
   const corridor = await corridorFromDefaults(gateway, {
@@ -123,11 +131,41 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   });
   const submitter: PaymentSubmitter = {
     async submit(request) {
+      // The gateway holds the connection synchronously for up to ~30s. If settlement
+      // finishes in that window, submitPayment returns the FulfillmentConfirmation.
       const res = await gateway.payments.submitPayment({ requestBody: request as never });
-      return {
-        payment_id: res.payment_id,
-        fulfillment_confirmation: res.fulfillment_confirmation as FulfillmentConfirmation | undefined,
-      };
+      if (res.fulfillment_confirmation) {
+        return {
+          payment_id: res.payment_id,
+          fulfillment_confirmation: res.fulfillment_confirmation as FulfillmentConfirmation,
+        };
+      }
+
+      // Past the synchronous window the payment is still settling — NOT failed.
+      // Poll GET /payments/{id}/status until it is terminal (never /timeline).
+      const paymentId = res.payment_id;
+      if (!paymentId) {
+        throw new Error("atum-escrow: gateway returned no payment_id to poll for settlement");
+      }
+      console.log(`  settlement exceeded the ~30s sync window; polling status for ${paymentId} …`);
+      const deadline = Date.now() + FULFILLMENT_DEADLINE_SECONDS * 1000;
+      while (Date.now() < deadline) {
+        await sleep(POLL_INTERVAL_MS);
+        const st = await gateway.payments.getPaymentStatus({ paymentId });
+        if (st.status === "completed") {
+          return {
+            payment_id: paymentId,
+            fulfillment_confirmation: st.fulfillment_confirmation as FulfillmentConfirmation | undefined,
+          };
+        }
+        if (st.status === "failed" || st.status === "cancelled") {
+          throw new Error(
+            `atum-escrow: payment ${st.status}` + (st.error ? `: ${JSON.stringify(st.error)}` : ""),
+          );
+        }
+        console.log(`  … settling (status: ${st.status ?? "pending"})`);
+      }
+      throw new Error("atum-escrow: settlement did not complete before the fulfillment deadline");
     },
   };
   return { corridor, submitter };
