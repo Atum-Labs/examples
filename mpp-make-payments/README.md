@@ -39,7 +39,8 @@ Edit `.env`:
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
-| `RESOURCE_URL` | No | URL of the MPP-gated resource. Defaults to `http://localhost:4030/paid-resource`. |
+| `MERCHANT_URL` | No | URL of the MPP-gated resource. Defaults to `http://localhost:4030/paid`. |
+| `RPC_URL` | No | Source-chain RPC URL. When set, the client approves the source token (Permit2) before paying. Leave blank against the stub merchant. |
 
 ### 3. Run the client
 
@@ -50,16 +51,19 @@ npm run pay
 Expected output when paired with the stub merchant:
 
 ```
-Requesting http://localhost:4030/paid-resource …
+Requesting http://localhost:4030/paid …
 Status: 200
 Payment-Receipt header: present
-{"message":"Access granted.","data":"Your premium content here."}
+{
+  "message": "Access granted.",
+  "data": "Your premium content here."
+}
 ```
 
 ## Going to testnet or mainnet
 
-1. Point `RESOURCE_URL` at a merchant settling through a real Atum Payment Gateway.
-2. Fund the payer wallet with the source token and approve the source escrow for it (Permit2). The `ensureSourceApproval` helper in `@atum-labs/mppx-atum-escrow/client` can do this for you.
+1. Point `MERCHANT_URL` at a merchant settling through a real Atum Payment Gateway.
+2. Fund the payer wallet with the source token. Set `RPC_URL` and the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atum-labs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
 
 ## Further reading
 

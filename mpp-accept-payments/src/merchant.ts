@@ -12,7 +12,7 @@ import {
 } from "@atum-labs/mppx-atum-escrow/server";
 
 const PORT = Number(process.env.PORT ?? 4030);
-const RESOURCE_PATH = "/paid-resource";
+const RESOURCE_PATH = "/paid";
 
 // mppx HMAC-binds the challenge to this key, so verify() can trust the challenge
 // terms without re-deriving them. It must be at least 32 bytes; use a real secret

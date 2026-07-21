@@ -2,11 +2,11 @@
 
 An example merchant server that accepts payments over the [Machine Payments Protocol (MPP)](https://mpp.dev) using Atum's `atum-escrow` payment method.
 
-The merchant gates a route (`GET /paid-resource`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
+The merchant gates a route (`GET /paid`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
 
 ## How it works
 
-1. A client hits `GET /paid-resource` without a payment credential.
+1. A client hits `GET /paid` without a payment credential.
 2. `mppx` returns `402 Payment Required` with an `atum-escrow` challenge (the corridor terms) in a `WWW-Authenticate: Payment` header.
 3. The client signs a payment credential and retries with an `Authorization: Payment` header.
 4. `mppx` calls this method's `verify()` — it checks the signature and terms locally, then hands the request to your `PaymentSubmitter`.
@@ -46,7 +46,7 @@ npm run dev
 You should see:
 
 ```
-MPP merchant listening on http://localhost:4030/paid-resource
+MPP merchant listening on http://localhost:4030/paid
 Submitter: stub (local, no funds)
 ```
 
