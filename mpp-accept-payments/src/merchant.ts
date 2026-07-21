@@ -59,7 +59,7 @@ function stubCorridor(): AtumEscrowCorridor {
     sources: [
       {
         network: SOURCE_NETWORK,
-        asset: SOURCE_ASSET,
+        assets: [SOURCE_ASSET],
         escrow: "0x0000000000000000000000000000000000000004",
         reserver: "0x0000000000000000000000000000000000000005",
         releaser: "0x0000000000000000000000000000000000000006",
@@ -103,7 +103,7 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   const gateway = new PaymentGatewayClient({ BASE: GATEWAY_URL });
   const corridor = await corridorFromDefaults(gateway, {
     destination,
-    sources: [{ network: SOURCE_NETWORK, asset: SOURCE_ASSET }],
+    sources: [{ network: SOURCE_NETWORK, assets: [SOURCE_ASSET] }],
     ...budgets,
   });
   const submitter: PaymentSubmitter = {
@@ -138,7 +138,7 @@ async function main() {
   // and chosen source into the `atum-escrow` charge request mppx emits on the 402.
   const request = buildChargeRequest(
     corridor,
-    { network: source.network, asset: source.asset },
+    { network: source.network, asset: source.assets[0] },
     FULFILLMENT_AMOUNT,
   );
 
