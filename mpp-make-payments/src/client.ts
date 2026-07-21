@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { ethers } from "ethers";
 import { Mppx } from "mppx/client";
-import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atum-labs/mppx-atum-escrow/client";
+import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atumlabs/mppx-atum-escrow/client";
 import { sendWithRetries } from "./retry.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL } = process.env;

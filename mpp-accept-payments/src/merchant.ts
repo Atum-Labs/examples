@@ -10,7 +10,7 @@ import {
   type PaymentSubmitter,
   type FulfillmentConfirmation,
   type PaymentRequest,
-} from "@atum-labs/mppx-atum-escrow/server";
+} from "@atumlabs/mppx-atum-escrow/server";
 
 const PORT = Number(process.env.PORT ?? 4030);
 const RESOURCE_PATH = "/paid";
