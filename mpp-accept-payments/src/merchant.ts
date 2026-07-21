@@ -1,4 +1,5 @@
 import * as http from "node:http";
+import { randomUUID } from "node:crypto";
 import "dotenv/config";
 import { Mppx } from "mppx/server";
 import {
@@ -16,9 +17,11 @@ const RESOURCE_PATH = "/paid";
 
 // mppx HMAC-binds the challenge to this key, so verify() can trust the challenge
 // terms without re-deriving them. It must be at least 32 bytes; use a real secret
-// in production.
+// in production. The placeholder below is public (it's committed in this repo), so
+// it must never protect real settlement — see the guard in main() below.
+const DEFAULT_SECRET_KEY = "dev-only-change-me-mpp-atum-escrow-secret-0123456789";
 const REALM = process.env.REALM ?? "mpp.example.com";
-const SECRET_KEY = process.env.MPP_SECRET_KEY ?? "dev-only-change-me-mpp-atum-escrow-secret-0123456789";
+const SECRET_KEY = process.env.MPP_SECRET_KEY ?? DEFAULT_SECRET_KEY;
 
 // Exact amount the merchant receives on the destination chain (atomic units).
 const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "100000"; // 0.10 (6-decimal token)
@@ -27,6 +30,18 @@ const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "100000"; // 0.10 (
 // USE_STUB_SUBMITTER=false to settle through a real Atum Payment Gateway instead.
 const USE_STUB_SUBMITTER = (process.env.USE_STUB_SUBMITTER ?? "true") !== "false";
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gateway-testnet.atumlabs.xyz";
+
+// The public placeholder secret is fine for the stub flow (nothing of value is at
+// stake), but would let anyone who's read this repo forge a trusted challenge
+// against a real gateway. Refuse to settle real money with it.
+if (!USE_STUB_SUBMITTER && SECRET_KEY === DEFAULT_SECRET_KEY) {
+  console.error(
+    "Refusing to start: MPP_SECRET_KEY is still the public placeholder from .env.example, " +
+      "and USE_STUB_SUBMITTER=false means real settlement is enabled. Set a real, private " +
+      "MPP_SECRET_KEY before accepting real payments.",
+  );
+  process.exit(1);
+}
 
 // What the merchant receives, the source it accepts, and the pricing/deadline budgets.
 // The corridor's contract addresses (escrow, reserver, releaser, fulfillment proxy,
@@ -152,18 +167,22 @@ async function main() {
       res.end(JSON.stringify({ error: "Not found." }));
       return;
     }
+    // A per-HTTP-request id for log correlation only — unrelated to MPP's own
+    // request_id/payment_id (those live inside the credential, not visible until
+    // mppx has parsed it). Lets you grep one request's lifecycle out of the logs.
+    const reqId = randomUUID().slice(0, 8);
     try {
       const result = await route(req, res);
       if (result.status === 402) {
-        console.log("→ 402: challenge issued");
+        console.log(`[${reqId}] → 402: challenge issued`);
         return; // toNodeListener already wrote the challenge
       }
       // Paid: mppx set the Payment-Receipt header; return the protected resource.
-      console.log("→ 200: settled, serving resource");
+      console.log(`[${reqId}] → 200: settled, serving resource`);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ message: "Access granted.", data: "Your premium content here." }));
     } catch (err) {
-      console.error("merchant route error:", (err as Error).message);
+      console.error(`[${reqId}] merchant route error:`, (err as Error).message);
       if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Payment verification or settlement failed." }));
     }

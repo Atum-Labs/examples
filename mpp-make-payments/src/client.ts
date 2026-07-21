@@ -2,6 +2,7 @@ import "dotenv/config";
 import { ethers } from "ethers";
 import { Mppx } from "mppx/client";
 import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atum-labs/mppx-atum-escrow/client";
+import { sendWithRetries } from "./retry.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL } = process.env;
 
@@ -45,12 +46,38 @@ if (RPC_URL) {
   });
 }
 
-// A single call: mppx handles the 402, builds and signs the credential, and retries.
-console.log(`Requesting ${MERCHANT_URL} …`);
-const res = await mppx.fetch(MERCHANT_URL);
-const receipt = res.headers.get("payment-receipt");
-const body = await res.json().catch(() => res.text());
+// Build the credential once with mppx.createCredential() and hand the SAME bytes to
+// every retry attempt — see ./retry.ts for why, and its own test for a proof that a
+// failing-then-recovering server gets the identical credential on every attempt.
+async function payWithCredential(credential: string): Promise<Response> {
+  return mppx.rawFetch(MERCHANT_URL, { headers: { Authorization: credential } });
+}
 
-console.log(`Status: ${res.status}`);
-console.log(`Payment-Receipt header: ${receipt ? "present" : "(none)"}`);
-console.log(JSON.stringify(body, null, 2));
+async function report(res: Response): Promise<void> {
+  const receipt = res.headers.get("payment-receipt");
+  const body = await res.json().catch(() => res.text());
+  console.log(`Status: ${res.status}`);
+  console.log(`Payment-Receipt header: ${receipt ? "present" : "(none)"}`);
+  console.log(JSON.stringify(body, null, 2));
+}
+
+console.log(`Requesting ${MERCHANT_URL} …`);
+try {
+  // mppx.rawFetch bypasses mppx's own automatic 402-handling, so we can drive the
+  // challenge -> credential -> retry sequence manually and control retries ourselves.
+  // This first request carries no credential and has no side effects, so retrying it
+  // on a transient failure is always safe — unlike the signed request below, where a
+  // retry must reuse the identical credential rather than sign a new one.
+  const challengeResponse = await sendWithRetries(() => mppx.rawFetch(MERCHANT_URL));
+  if (challengeResponse.status !== 402) {
+    // Not a payment challenge (already open, or an unrelated error) — nothing to pay for.
+    await report(challengeResponse);
+  } else {
+    const credential = await mppx.createCredential(challengeResponse);
+    const res = await sendWithRetries(() => payWithCredential(credential));
+    await report(res);
+  }
+} catch (err) {
+  console.error("payment failed:", (err as Error).message);
+  process.exit(1);
+}

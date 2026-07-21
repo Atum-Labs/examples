@@ -9,6 +9,12 @@ The client handles the full payment flow automatically:
 3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
 4. Retries the request with the signed credential and returns the final `200` response.
 
+## Resilience: safe retries
+
+If the paid request fails or times out — for example, if the merchant restarts while your payment is settling — this client automatically retries, up to 3 times, using the **exact same signed credential** rather than a freshly-signed one.
+
+This matters because a payment is only safe to retry this way: the Atum Payment Gateway recognizes an identical resubmission and returns the original result instead of settling twice, whereas a *newly signed* request would be a distinct, second payment. That's why this example builds the credential once (via `mppx.createCredential`) and reuses it across attempts, rather than relying on a single one-shot request.
+
 ## Pair with mpp-accept-payments
 
 This example is designed to work alongside [`mpp-accept-payments`](../mpp-accept-payments), which runs the merchant server on `http://localhost:4030`. Run that first (its default stub submitter needs no funds), then run the client here.
@@ -60,10 +66,27 @@ Payment-Receipt header: present
 }
 ```
 
+## Testing
+
+```bash
+npm test
+```
+
+This verifies the retry behavior described above against a server that fails a couple of times before succeeding — no live merchant needed. To test this client together with a real `mpp-accept-payments` merchant instead, run `npm test` from [`../mpp-accept-payments`](../mpp-accept-payments) — that test drives both apps together.
+
 ## Going to testnet or mainnet
 
 1. Point `MERCHANT_URL` at a merchant settling through a real Atum Payment Gateway.
 2. Fund the payer wallet with the source token. Set `RPC_URL` and the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atumlabs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
+
+## Project structure
+
+```
+src/
+├── client.ts       # The mppx client — pay for a gated resource in one call
+├── retry.ts        # Retry policy for the paid request (see "Resilience: safe retries" above)
+└── retry.test.ts   # Verifies the retry policy against a server that fails then recovers
+```
 
 ## Further reading
 

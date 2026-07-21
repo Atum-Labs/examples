@@ -50,15 +50,28 @@ MPP merchant listening on http://localhost:4030/paid
 Submitter: stub (local, no funds)
 ```
 
+Each request is logged with a short id (e.g. `[a1b2c3d4]`) so you can trace one request's lifecycle in the logs.
+
 ### 4. Try a payment
 
 Drive a payment through it with the [`mpp-make-payments`](../mpp-make-payments) client — a `curl` can't easily produce the signed credential MPP expects. Start this server, then run `npm run pay` there; you should get a `200` with a `Payment-Receipt` header.
 
+## Testing
+
+```bash
+npm test
+```
+
+This boots the merchant (in stub mode) and drives real payments against it using the `mpp-make-payments` client, then checks for a successful `200` response with a receipt. It also covers a few things worth knowing your setup handles correctly: concurrent payments from different wallets, the same wallet paying more than once, and the server refusing to start when it's misconfigured for real settlement.
+
+> This test drives the `mpp-make-payments` client too, so make sure you've also run `npm install` in [`../mpp-make-payments`](../mpp-make-payments) before running it.
+
 ## Going to testnet / mainnet
 
-1. Set `USE_STUB_SUBMITTER=false` and `GATEWAY_URL` to an Atum-provided Payment Gateway.
-2. Set your `DEST_*` and `SOURCE_*` (chains, tokens, receive address). The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
-3. The payer must hold the source token and have approved the source escrow (Permit2) — see the `mpp-make-payments` example.
+1. Set a real, private `MPP_SECRET_KEY` — the default value is a public placeholder (it ships in this repo), and the server refuses to start with it once real settlement is enabled.
+2. Set `USE_STUB_SUBMITTER=false` and `GATEWAY_URL` to an Atum-provided Payment Gateway.
+3. Set your `DEST_*` and `SOURCE_*` (chains, tokens, receive address). The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
+4. The payer must hold the source token and have approved the source escrow (Permit2) — see the `mpp-make-payments` example.
 
 > With a real gateway, `verify()` holds the inbound request open until settlement completes (the Payment Gateway's synchronous window — a few seconds). Make sure your server/proxy read timeout and the client's request timeout both exceed it, or a successful payment may never be served.
 
@@ -66,7 +79,8 @@ Drive a payment through it with the [`mpp-make-payments`](../mpp-make-payments) 
 
 ```
 src/
-└── merchant.ts   # The mppx server — gate a route behind MPP payment
+├── merchant.ts     # The mppx server — gate a route behind MPP payment
+└── smoke.test.ts   # End-to-end check: boots both apps together and verifies a payment succeeds
 ```
 
 ## Further reading
