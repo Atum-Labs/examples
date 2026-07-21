@@ -27,7 +27,7 @@ This example is designed to work alongside [`x402-accept-payments`](../x402-acce
 npm install
 ```
 
-> `@atumlabs/x402-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](https://calendly.com/pramod-hs-atumlabs/30min) for access, then run `npm login` before `npm install`.
+> `@atumlabs/x402-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](mailto:support@atumlabs.xyz) for access, then run `npm login` before `npm install`.
 
 ### 2. Configure environment
 
