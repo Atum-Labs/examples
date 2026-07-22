@@ -1,18 +1,32 @@
 /**
  * ⚠️  FOR LOCAL DEVELOPMENT ONLY
  *
- * This is a mock x402 facilitator that always approves and "settles" payments
- * without touching any blockchain. It exists so you can run the full request
- * flow locally before you have an Atum-provided facilitator URL.
+ * The **facilitator** is the hosted Atum service that verifies and settles x402
+ * payments. This file is a throwaway local stand-in for it, so you can exercise
+ * the full request flow with no funds and no network.
  *
- * Replace FACILITATOR_URL in your .env with the real URL when you're ready
- * to test against testnet or mainnet.
+ * It is NOT a replacement for the Atum x402 package: the merchant (`merchant.ts`)
+ * still uses `@atumlabs/x402-atum-escrow/server` either way — this mock only
+ * replaces the remote verify/settle service the package's HTTPFacilitatorClient
+ * calls. Its `/verify` and `/settle` responses mirror the real facilitator's
+ * contract, but always approve and never move funds.
+ *
+ * Every settlement it returns is tagged `mock: true` with a fake transaction
+ * hash. For real settlement, point the merchant's FACILITATOR_URL at a hosted
+ * Atum facilitator and set GATEWAY_URL so it reads live corridor addresses.
  */
 
 import "dotenv/config";
 import express, { Request, Response } from "express";
 
 const PORT = Number(process.env.MOCK_FACILITATOR_PORT ?? 8091);
+
+// Echo the merchant's configured source/destination so the mock stays coherent
+// with whatever corridor you point it at.
+const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:84532";
+const DEST_NETWORK = process.env.DEST_NETWORK ?? "eip155:42431";
+const SOURCE_ASSET =
+  process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
 const app = express();
 app.use(express.json());
@@ -30,7 +44,7 @@ app.post("/settle", (_req: Request, res: Response) => {
   res.json({
     success: true,
     transaction: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-    network: "eip155:42161",
+    network: DEST_NETWORK,
     payer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     fulfillmentConfirmation: {
       mock: true,
@@ -46,9 +60,9 @@ app.get("/supported", (_req: Request, res: Response) => {
       {
         x402Version: 2,
         scheme: "atum-escrow",
-        network: "eip155:8453",
+        network: SOURCE_NETWORK,
         extra: {
-          tokens: ["0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"],
+          tokens: [SOURCE_ASSET],
         },
       },
     ],

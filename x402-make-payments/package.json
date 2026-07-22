@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "pay": "tsx src/client.ts",
+    "test:corridor": "tsx src/corridor-test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -66,3 +66,29 @@ Status: 200
 2. Make sure your wallet holds the source token on the supported chain.
 3. Run `approve(Permit2, type(uint160).max)` on the source token contract once (or set `RPC_URL` in `.env` — the client will tell you if your allowance is insufficient).
 4. Replace `FACILITATOR_URL` in the merchant's `.env` with an Atum-provided URL.
+
+## Optional: live corridor test (Base Sepolia → Tempo Moderato)
+
+`npm run pay` prints the response but doesn't assert anything, so it passes even against the mock. `test:corridor` runs the same flow but **asserts** the payment settled **synchronously on the expected destination network against a real facilitator** — a pass/fail check you can wire into CI for a specific corridor.
+
+It is opt-in because it moves real testnet funds. To run it end to end you need:
+
+- A funded source wallet with an `approve(Permit2)` allowance on the source token (Base Sepolia USDC by default).
+- A merchant pointed at a **real** Atum facilitator with `GATEWAY_URL` set (not the mock — the test fails loudly on a mock receipt so it can never give a false pass).
+
+```bash
+# In x402-accept-payments/.env: set FACILITATOR_URL + GATEWAY_URL to Atum testnet, then:
+#   cd ../x402-accept-payments && npm run merchant
+
+# Here, with PRIVATE_KEY, MERCHANT_URL, EXPECT_NETWORK, and RPC_URL set in .env:
+npm run test:corridor
+```
+
+On success it prints the settlement network, transaction hash, and payer, and exits `0`. On any failure (wrong status, missing receipt, mock receipt, or settled on the wrong network) it exits non-zero.
+
+| Variable | Required | Description |
+|---|---|---|
+| `PRIVATE_KEY` | Yes | Payer wallet key. |
+| `MERCHANT_URL` | No | Gated resource. Defaults to `http://localhost:4020/paid`. |
+| `EXPECT_NETWORK` | Yes | Destination CAIP-2 the receipt must report (e.g. `eip155:42431` for Tempo Moderato). |
+| `RPC_URL` | No | Source-chain RPC; preflights the Permit2 allowance. |

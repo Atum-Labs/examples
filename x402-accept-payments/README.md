@@ -4,19 +4,23 @@ An example merchant server that accepts cross-chain payments using the [x402](ht
 
 The merchant gates a route behind payment: unauthenticated requests receive an HTTP 402 with the payment options you accept; requests with a valid payment credential are verified and settled through the Atum facilitator before the protected content is returned.
 
+The protocol work is done by the Atum package — `paymentMiddleware` gates the route, `registerAtumEscrowScheme` builds the `402`, and `HTTPFacilitatorClient` delegates verify/settle. You never hand-build a `402` or call `/verify` / `/settle` yourself.
+
 ## How it works
 
 1. A client hits `GET /paid` without a payment credential.
-2. The merchant returns `402 Payment Required` with its accepted payment options in a `PAYMENT-REQUIRED` header (mirrored in the JSON body for readability).
-3. The client signs a payment credential and retries with a `PAYMENT-SIGNATURE` header.
-4. The merchant calls `/verify` on the facilitator — validates the credential without moving funds.
-5. The merchant calls `/settle` — funds are moved on-chain.
-6. The merchant returns `200 OK` with the protected resource and a `PAYMENT-RESPONSE` header carrying the settlement receipt.
+2. `paymentMiddleware` returns `402 Payment Required` with the accepted payment options.
+3. The client signs a payment credential and retries with it.
+4. The middleware verifies the credential with the facilitator (no funds moved), then settles it (funds move on-chain).
+5. The route handler runs and returns `200 OK` with the protected resource and a `PAYMENT-RESPONSE` header carrying the settlement receipt.
+
+Corridor contract addresses (escrow, fulfillment proxy, verifier, roles) are Atum-network facts, so the merchant reads them from the payment gateway's `/defaults` at startup rather than hardcoding them.
 
 ## Prerequisites
 
 - Node.js 20+
 - npm
+- Access to the `@atumlabs/x402-atum-escrow` package (early access — see below)
 
 ## Quickstart
 
@@ -26,13 +30,15 @@ The merchant gates a route behind payment: unauthenticated requests receive an H
 npm install
 ```
 
+> `@atumlabs/x402-atum-escrow` is published under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](mailto:support@atumlabs.xyz), then run `npm login` before `npm install`.
+
 ### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and fill in your corridor config (`DEST_ADDRESS`, `ESCROW_CONTRACT`, etc.). Contact Atum to get contract addresses for your corridor.
+Edit `.env` and set `DEST_ADDRESS` to the address you want to receive on. The corridor defaults to **Base Sepolia USDC → Tempo Moderato pathUSD**. Leave `GATEWAY_URL` unset for local mock mode.
 
 ### 3. Start everything
 
@@ -42,38 +48,34 @@ npm run dev
 
 This starts the mock facilitator and the merchant server together in one terminal.
 
-> The mock facilitator always approves payments without touching any blockchain. Replace `FACILITATOR_URL` in `.env` with an Atum-provided URL when you're ready to test against testnet or mainnet.
+> The mock facilitator always approves payments without touching any blockchain — it's a local stand-in for Atum's hosted facilitator, not a replacement for the package (the merchant uses `@atumlabs/x402-atum-escrow/server` either way). Set `GATEWAY_URL` and point `FACILITATOR_URL` at an Atum facilitator when you're ready for real settlement.
 
 ### 4. Test it
 
-Without payment (expect 402):
+Without payment (expect `402`):
 
 ```bash
 curl -i http://localhost:4020/paid
 ```
 
-With a mock payment credential:
+With a real payment credential, drive it from the sibling [`x402-make-payments`](../x402-make-payments) client:
 
 ```bash
-# Base64-encode a minimal payment payload
-PAYMENT=$(echo '{"x402Version":2,"accepted":{"scheme":"atum-escrow"},"payload":{"paymentRequest":{}}}' | base64)
-
-curl -i http://localhost:4020/paid \
-  -H "PAYMENT-SIGNATURE: $PAYMENT"
+cd ../x402-make-payments && npm run pay
 ```
 
 ## Going to testnet / mainnet
 
-1. Get your facilitator URL and contract addresses from Atum.
-2. Update `FACILITATOR_URL`, `ESCROW_CONTRACT`, `FULFILLMENT_PROXY`, `RESERVER`, `RELEASER`, and `VERIFIER_ENDPOINT` in `.env`.
-3. Run `npm run merchant` — no other changes needed.
+1. Get your facilitator URL and gateway URL from Atum.
+2. Set `FACILITATOR_URL` and `GATEWAY_URL` in `.env` (contract addresses are read from `${GATEWAY_URL}/defaults`).
+3. Run `npm run merchant` — no code changes needed.
 
 ## Project structure
 
 ```
 src/
 ├── merchant.ts          # The merchant server — gate a route behind x402 payment
-└── mock-facilitator.ts  # Local-only mock facilitator for development
+└── mock-facilitator.ts  # Local-only stand-in for the hosted Atum facilitator
 ```
 
 ## Further reading
