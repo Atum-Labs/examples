@@ -16,7 +16,8 @@ const MARKUP_BPS = BigInt(process.env.MARKUP_BPS || "0");
 // markup. Atum converts this to the exact FULFILLMENT_AMOUNT on the destination
 // chain; anything above the fulfillment amount covers fees.
 const SOURCE_MAX_AMOUNT = (
-  (BigInt(FULFILLMENT_AMOUNT) * (10000n + MARKUP_BPS)) / 10000n
+  (BigInt(FULFILLMENT_AMOUNT) * (10000n + MARKUP_BPS)) /
+  10000n
 ).toString();
 
 // ---------------------------------------------------------------------------
@@ -44,10 +45,10 @@ const decodeHeader = <T>(value: string): T =>
 
 interface PaymentRequirements {
   scheme: "atum-escrow";
-  network: string;       // CAIP-2 source chain (e.g. "eip155:8453")
-  asset: string;         // Source token contract address
-  payTo: string;         // Source-chain escrow contract address
-  amount: string;        // Source spend cap in atomic units
+  network: string; // CAIP-2 source chain (e.g. "eip155:8453")
+  asset: string; // Source token contract address
+  payTo: string; // Source-chain escrow contract address
+  amount: string; // Source spend cap in atomic units
   maxTimeoutSeconds: number;
   extra: {
     atum: {
@@ -73,8 +74,8 @@ interface ResourceInfo {
 // Encoded into the PAYMENT-REQUIRED header on the 402.
 interface PaymentRequired {
   x402Version: 2;
-  resource: ResourceInfo;             // required by the spec — describes the gated resource
-  accepts: PaymentRequirements[];     // one entry per payment option offered
+  resource: ResourceInfo; // required by the spec — describes the gated resource
+  accepts: PaymentRequirements[]; // one entry per payment option offered
   error?: string;
 }
 
@@ -116,24 +117,37 @@ interface SettleResponse {
 const PAYMENT_REQUIREMENTS: PaymentRequirements = {
   scheme: "atum-escrow",
   network: process.env.SOURCE_NETWORK ?? "eip155:8453",
-  asset: process.env.SOURCE_ASSET ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  payTo: process.env.ESCROW_CONTRACT ?? "0x0000000000000000000000000000000000000001",
+  asset:
+    process.env.SOURCE_ASSET ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  payTo:
+    process.env.ESCROW_CONTRACT ?? "0x0000000000000000000000000000000000000001",
   amount: SOURCE_MAX_AMOUNT,
   maxTimeoutSeconds: 60,
   extra: {
     atum: {
       destination: {
         network: process.env.DEST_NETWORK ?? "eip155:42161",
-        asset: process.env.DEST_ASSET ?? "0x52e52f345139e57b87d288c9ea794bb3fbe591c3",
-        address: process.env.DEST_ADDRESS ?? "0x0000000000000000000000000000000000000002",
+        asset:
+          process.env.DEST_ASSET ??
+          "0x52e52f345139e57b87d288c9ea794bb3fbe591c3",
+        address:
+          process.env.DEST_ADDRESS ??
+          "0x0000000000000000000000000000000000000002",
       },
       fulfillmentAmount: FULFILLMENT_AMOUNT,
-      escrow: process.env.ESCROW_CONTRACT ?? "0x0000000000000000000000000000000000000001",
-      fulfillmentProxy: process.env.FULFILLMENT_PROXY ?? "0x0000000000000000000000000000000000000003",
-      reserver: process.env.RESERVER ?? "0x0000000000000000000000000000000000000004",
-      releaser: process.env.RELEASER ?? "0x0000000000000000000000000000000000000005",
-      fulfillmentVerifierEndpoint: process.env.VERIFIER_ENDPOINT ?? "http://localhost:8080/veri-fill",
-      quoteDeadlineSeconds: 20,
+      escrow:
+        process.env.ESCROW_CONTRACT ??
+        "0x0000000000000000000000000000000000000001",
+      fulfillmentProxy:
+        process.env.FULFILLMENT_PROXY ??
+        "0x0000000000000000000000000000000000000003",
+      reserver:
+        process.env.RESERVER ?? "0x0000000000000000000000000000000000000004",
+      releaser:
+        process.env.RELEASER ?? "0x0000000000000000000000000000000000000005",
+      fulfillmentVerifierEndpoint:
+        process.env.VERIFIER_ENDPOINT ?? "http://localhost:8080/veri-fill",
+      quoteDeadlineSeconds: 5,
       fulfillmentDeadlineSeconds: 300,
     },
   },
@@ -182,7 +196,11 @@ app.get("/paid", async (req: Request, res: Response) => {
 
   // No payment credential — issue the 402 challenge with what we accept.
   if (!paymentHeader) {
-    const challenge: PaymentRequired = { x402Version: 2, resource, accepts: [PAYMENT_REQUIREMENTS] };
+    const challenge: PaymentRequired = {
+      x402Version: 2,
+      resource,
+      accepts: [PAYMENT_REQUIREMENTS],
+    };
     console.log("→ 402: no payment credential, issuing challenge");
     res
       .status(402)
@@ -213,7 +231,9 @@ app.get("/paid", async (req: Request, res: Response) => {
   try {
     verified = await verify(facilitatorRequest);
   } catch (err) {
-    res.status(502).json({ error: "Facilitator /verify unreachable.", detail: String(err) });
+    res
+      .status(502)
+      .json({ error: "Facilitator /verify unreachable.", detail: String(err) });
     return;
   }
 
@@ -225,7 +245,10 @@ app.get("/paid", async (req: Request, res: Response) => {
       error: verified.invalidReason ?? "Payment credential is not valid.",
     };
     console.log(`→ 402: verify rejected (${challenge.error})`);
-    res.status(402).set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge)).json(challenge);
+    res
+      .status(402)
+      .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
+      .json(challenge);
     return;
   }
 
@@ -234,7 +257,9 @@ app.get("/paid", async (req: Request, res: Response) => {
   try {
     settled = await settle(facilitatorRequest);
   } catch (err) {
-    res.status(502).json({ error: "Facilitator /settle unreachable.", detail: String(err) });
+    res
+      .status(502)
+      .json({ error: "Facilitator /settle unreachable.", detail: String(err) });
     return;
   }
 
@@ -246,7 +271,10 @@ app.get("/paid", async (req: Request, res: Response) => {
       error: settled.errorReason ?? "Settlement failed.",
     };
     console.log(`→ 402: settle failed (${challenge.error})`);
-    res.status(402).set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge)).json(challenge);
+    res
+      .status(402)
+      .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
+      .json(challenge);
     return;
   }
 
