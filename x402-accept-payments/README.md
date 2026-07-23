@@ -102,7 +102,7 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The corridor (Base Sepolia USDC → Tempo pathUSD), the facilitator URL, the gateway URL, amount, markup, and deadlines all have working defaults — override any of them in `.env` (see the variables read at the top of `src/merchant.ts`). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you don't configure them by hand.
+The corridor defaults to **Base Sepolia USDC → Tempo pathUSD**. To switch corridors, uncomment one **source** pair and one **dest** pair from the corridor menu in `.env.example` — a curated, copy-paste-correct list drawn from [Supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2; not every pair has settlement coverage yet — see the notes there). The escrow, proxy, reserver, releaser, and verifier addresses are then fetched from the gateway's `/defaults` automatically — you never paste them by hand. Amount, markup, deadlines, and the facilitator/gateway URLs also have working defaults (see the top of `src/merchant.ts`).
 
 The payer funds the payment (source token + gas) — see [`x402-make-payments`](../x402-make-payments). On a successful real settlement the merchant logs the settlement transaction:
 
