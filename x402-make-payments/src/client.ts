@@ -46,3 +46,18 @@ const body = await response.json().catch(() => response.text());
 
 console.log(`Status: ${response.status}`);
 console.log(JSON.stringify(body, null, 2));
+
+// A 402 whose error is the x402 v1 "async tail" is NOT a settlement failure: the
+// payment was submitted and is settling asynchronously, but cross-chain settlement
+// outran the facilitator's synchronous window (~30s), so x402 can't confirm it here.
+// Frame it as pending, not failed, and steer away from slow corridors.
+const errorText =
+  body && typeof body === "object" && "error" in body ? String((body as { error?: unknown }).error) : "";
+if (response.status === 402 && /async tail is not supported|did not complete synchronously/i.test(errorText)) {
+  console.warn(
+    "\n⚠  Settlement pending — NOT a failure.\n" +
+      "   The payment was submitted, but cross-chain settlement is taking longer than x402's\n" +
+      "   synchronous window (~30s), so the facilitator can't confirm it here. It may still\n" +
+      "   complete. Prefer faster corridors, or verify settlement on-chain / via the gateway.",
+  );
+}
