@@ -68,10 +68,27 @@ This boots the merchant (in stub mode) and drives real payments against it using
 
 ## Going to testnet / mainnet
 
-1. Set a real, private `MPP_SECRET_KEY` — the default value is a public placeholder (it ships in this repo), and the server refuses to start with it once real settlement is enabled.
-2. Set `USE_STUB_SUBMITTER=false` and `GATEWAY_URL` to an Atum-provided Payment Gateway.
-3. Set your `DEST_*` and `SOURCE_*` (chains, tokens, receive address). The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
-4. The payer must hold the source token and have approved the source escrow (Permit2) — see the `mpp-make-payments` example.
+The shipped `.env.example` is already wired for a live **testnet** corridor — it accepts **Base Sepolia USDC** and delivers **Tempo (Moderato) pathUSD**, settling through Atum's testnet gateway (`GATEWAY_URL=https://payment-gw.production-testnet.atum.xyz`). To settle for real instead of the stub, change three values in `.env`:
+
+1. `USE_STUB_SUBMITTER=false` — switch from the canned stub to real settlement.
+2. `MPP_SECRET_KEY=` — set a private one (`openssl rand -hex 32`). The default is a public placeholder and the server refuses to start with it once real settlement is enabled.
+3. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
+
+The corridor (`SOURCE_*` = Base Sepolia USDC, `DEST_*` = Tempo pathUSD), the amount (`FULFILLMENT_AMOUNT=50000`, i.e. `0.05`), and the markup/deadlines are already set — adjust them for a different corridor. The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
+
+The payer funds the payment (source token + Base Sepolia gas) — see the [`mpp-make-payments`](../mpp-make-payments) example. Once both are running, a successful real settlement logs the source (Base) and destination (Tempo) transaction links (your ids and hashes will differ):
+
+```
+MPP merchant listening on http://localhost:4030/paid
+Submitter: real gateway https://payment-gw.production-testnet.atum.xyz
+[9b590148] → 402: challenge issued
+  settled payment 0xcd49e71041cf5834d7f7599ed31b0028a16d08363d04c202ebdbe3223f404752
+    source deposit:     https://sepolia.basescan.org/tx/0x4b5e59c9ee03f64fa85bcbda5a20a6ba4c0626e59d19b0a079acafdb0af9ec34
+    destination payout: https://explore.testnet.tempo.xyz/tx/0xf941a02fdc39dbff3a2a54aafa9f950fcd6301b28df32b845ca9ba9485408bf3
+[8cb31437] → 200: settled, serving resource
+```
+
+For **mainnet**, the steps are identical — point `GATEWAY_URL` at a production gateway and set `SOURCE_*`/`DEST_*` to mainnet chains and tokens.
 
 > With a real gateway, `verify()` holds the inbound request open until settlement completes (the Payment Gateway's synchronous window — a few seconds). Make sure your server/proxy read timeout and the client's request timeout both exceed it, or a successful payment may never be served.
 
