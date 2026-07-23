@@ -10,7 +10,7 @@
     "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@atumlabs/mppx-atum-escrow": "^0.1.0",
+    "@atumlabs/mppx-atum-escrow": "^0.1.1",
     "mppx": "0.8.12",
     "zod": "^4.4.3",
     "ethers": "^6.13.0",
