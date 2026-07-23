@@ -19,7 +19,7 @@ const RESOURCE_PATH = "/paid";
 // terms without re-deriving them. It must be at least 32 bytes; use a real secret
 // in production. The placeholder below is public (it's committed in this repo), so
 // it must never protect real settlement — see the guard in main() below.
-const DEFAULT_SECRET_KEY = "dev-only-change-me-mpp-atum-escrow-secret-0123456789";
+const DEFAULT_SECRET_KEY = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const REALM = process.env.REALM ?? "mpp.example.com";
 const SECRET_KEY = process.env.MPP_SECRET_KEY ?? DEFAULT_SECRET_KEY;
 
@@ -29,7 +29,7 @@ const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "100000"; // 0.10 (
 // The stub submitter runs the full flow locally with no gateway and no funds. Set
 // USE_STUB_SUBMITTER=false to settle through a real Atum Payment Gateway instead.
 const USE_STUB_SUBMITTER = (process.env.USE_STUB_SUBMITTER ?? "true") !== "false";
-const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gateway-testnet.atumlabs.xyz";
+const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gw.production-testnet.atum.xyz";
 
 // The public placeholder secret is fine for the stub flow (nothing of value is at
 // stake), but would let anyone who's read this repo forge a trusted challenge
@@ -112,12 +112,46 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Block explorers for the chains this corridor uses, so settlement logs print
+// clickable tx links instead of bare hashes. Any chain not listed falls back to
+// the raw hash plus its CAIP-2 id.
+const TX_EXPLORERS: Record<string, string> = {
+  "eip155:84532": "https://sepolia.basescan.org/tx/", // Base Sepolia
+  "eip155:42431": "https://explore.testnet.tempo.xyz/tx/", // Tempo Moderato
+};
+
+function txLink(chainId: string | undefined, hash: string | undefined): string {
+  if (!hash) return "(none)";
+  const base = chainId ? TX_EXPLORERS[chainId] : undefined;
+  return base ? `${base}${hash}` : `${hash}${chainId ? ` (${chainId})` : ""}`;
+}
+
+// Where the money moved: the source-chain escrow deposit and the destination payout.
+function logSettlement(confirmation: FulfillmentConfirmation | undefined): void {
+  if (!confirmation) return;
+  console.log(`  settled payment ${confirmation.payment_id}`);
+  console.log(`    source deposit:     ${txLink(confirmation.source_chain_id, confirmation.source_tx_hash)}`);
+  console.log(`    destination payout: ${txLink(confirmation.destination_chain_id, confirmation.destination_tx_hash)}`);
+}
+
+// Wrap a submitter so every successful settle logs its on-chain tx hashes — the
+// one-glance "did the funds move?" check, for both the stub and the real gateway.
+function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
+  return {
+    async submit(request) {
+      const result = await submitter.submit(request);
+      logSettlement(result.fulfillment_confirmation);
+      return result;
+    },
+  };
+}
+
 // Resolve the corridor and the submitter for the chosen mode. MPP has no separate
 // facilitator: the merchant verifies in-process and submits through the submitter.
 async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: PaymentSubmitter }> {
   if (USE_STUB_SUBMITTER) {
     const corridor = stubCorridor();
-    return { corridor, submitter: stubSubmitter(corridor) };
+    return { corridor, submitter: withSettlementLog(stubSubmitter(corridor)) };
   }
 
   // Real settlement: one gateway client both discovers the corridor addresses and
@@ -168,7 +202,7 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
       throw new Error("atum-escrow: settlement did not complete before the fulfillment deadline");
     },
   };
-  return { corridor, submitter };
+  return { corridor, submitter: withSettlementLog(submitter) };
 }
 
 // ---------------------------------------------------------------------------

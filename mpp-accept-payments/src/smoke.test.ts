@@ -21,6 +21,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MERCHANT_DIR = path.resolve(HERE, "..");
 const CLIENT_DIR = path.resolve(HERE, "../../mpp-make-payments");
 
+// The merchant and client both `import "dotenv/config"`, which loads the .env in
+// their working directory. Every spawned process below is pointed at a path that
+// does not exist, so dotenv loads nothing and the tests stay hermetic. Otherwise a
+// developer's real .env (real MPP_SECRET_KEY, USE_STUB_SUBMITTER=false, a live
+// gateway) leaks into the child and, e.g., defeats the placeholder-secret guard the
+// refuse-to-start test relies on — booting the merchant in real mode so it never exits.
+const NO_DOTENV = path.join(HERE, "no-such.env");
+
 function tsxBin(dir: string): string {
   return path.join(dir, "node_modules", ".bin", "tsx");
 }
@@ -56,7 +64,7 @@ function runClient(env: Record<string, string>): Promise<{ exitCode: number; out
   return new Promise((resolve, reject) => {
     const client = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], {
       cwd: CLIENT_DIR,
-      env: { ...process.env, ...env },
+      env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, ...env },
     });
     let output = "";
     client.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
@@ -69,7 +77,7 @@ function runClient(env: Record<string, string>): Promise<{ exitCode: number; out
 async function withMerchant(port: number, fn: (merchantUrl: string) => Promise<void>): Promise<void> {
   const merchant = spawn(tsxBin(MERCHANT_DIR), ["src/merchant.ts"], {
     cwd: MERCHANT_DIR,
-    env: { ...process.env, PORT: String(port), USE_STUB_SUBMITTER: "true" },
+    env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, PORT: String(port), USE_STUB_SUBMITTER: "true" },
   });
   merchant.stderr.on("data", () => {}); // drained so a slow reader can't back-pressure the child
 
@@ -127,7 +135,12 @@ test("the same wallet can complete multiple independent payments in sequence", a
 test("refuses to start in real-settlement mode with the default placeholder secret", async () => {
   // MPP_SECRET_KEY is deleted (not just omitted) so this test doesn't depend on
   // whatever happens to be set in the environment it runs in.
-  const env: NodeJS.ProcessEnv = { ...process.env, PORT: "4095", USE_STUB_SUBMITTER: "false" };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    DOTENV_CONFIG_PATH: NO_DOTENV,
+    PORT: "4095",
+    USE_STUB_SUBMITTER: "false",
+  };
   delete env.MPP_SECRET_KEY;
 
   const merchant = spawn(tsxBin(MERCHANT_DIR), ["src/merchant.ts"], { cwd: MERCHANT_DIR, env });
