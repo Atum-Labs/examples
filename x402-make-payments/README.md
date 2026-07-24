@@ -9,6 +9,8 @@ The client handles the full payment flow automatically:
 3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
 4. Retries the request with the signed credential in a `PAYMENT-SIGNATURE` header and returns the final `200` response.
 
+> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, facilitator, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+
 ## Pair with x402-accept-payments
 
 This example is designed to work alongside [`x402-accept-payments`](../x402-accept-payments), which runs the merchant server on `http://localhost:4020`. Run that first (its default stub needs no funds), then run the client here.
@@ -78,7 +80,7 @@ Make sure the paired merchant is running in real mode (`USE_STUB_FACILITATOR=fal
 
 On success the client prints the `200` and resource body; the merchant terminal prints the settlement transaction. Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
 
-For **mainnet**, the steps are identical with mainnet chains/tokens and a merchant settling through a production facilitator.
+For **mainnet** (where authorized by Atum), the steps are identical with Atum-authorized mainnet chains/tokens and a merchant settling through a production facilitator.
 
 ## Project structure
 

@@ -6,6 +6,8 @@ The merchant gates a route (`GET /paid`) behind payment: unpaid requests receive
 
 By default this example uses a **stub** that runs the full `402 → pay → 200` flow locally with no facilitator, gateway, or funds — the x402 counterpart of the stub submitter in [`mpp-accept-payments`](../mpp-accept-payments). Flip one flag to settle for real.
 
+> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, facilitator, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+
 ## How it works
 
 1. A client hits `GET /paid` without a payment credential.
@@ -113,7 +115,7 @@ Facilitator: real https://x402-facilitator.production-testnet.atum.xyz · corrid
 → 200: settled (tx 0x…)
 ```
 
-For **mainnet**, the steps are identical — point `FACILITATOR_URL` / `GATEWAY_URL` at production and set the corridor to mainnet chains and tokens.
+For **mainnet** (where authorized by Atum), the steps are identical — point `FACILITATOR_URL` / `GATEWAY_URL` at production and set the corridor to Atum-authorized mainnet chains and tokens.
 
 ## Project structure
 
