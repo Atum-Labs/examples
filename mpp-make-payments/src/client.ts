@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Atum Labs, Inc. All rights reserved.
+ * Proprietary reference implementation; not open source.
+ * Access and use are governed by the LICENSE file at the root of this repository.
+ * Do not remove, alter, or obscure this notice.
+ */
+
 import "dotenv/config";
 import { ethers } from "ethers";
 import { Mppx } from "mppx/client";

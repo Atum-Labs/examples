@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Atum Labs, Inc. All rights reserved.
+ * Proprietary reference implementation; not open source.
+ * Access and use are governed by the LICENSE file at the root of this repository.
+ * Do not remove, alter, or obscure this notice.
+ */
+
 // Retry policy for a signed payment request. The Atum Payment Gateway is idempotent
 // on identical bytes: if a request fails or times out *after* the deposit already
 // settled (e.g. the merchant restarted mid-settlement), resending the exact same

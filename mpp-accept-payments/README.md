@@ -4,6 +4,8 @@ An example merchant server that accepts payments over the [Machine Payments Prot
 
 The merchant gates a route (`GET /paid`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
 
+> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+
 ## How it works
 
 1. A client hits `GET /paid` without a payment credential.
@@ -88,7 +90,7 @@ Submitter: real gateway https://payment-gw.production-testnet.atum.xyz
 [8cb31437] → 200: settled, serving resource
 ```
 
-For **mainnet**, the steps are identical — point `GATEWAY_URL` at a production gateway and set `SOURCE_*`/`DEST_*` to mainnet chains and tokens.
+For **mainnet** (where authorized by Atum), the steps are identical — point `GATEWAY_URL` at a production gateway and set `SOURCE_*`/`DEST_*` to Atum-authorized mainnet chains and tokens.
 
 > With a real gateway, `verify()` holds the inbound request open until settlement completes (the Payment Gateway's synchronous window — a few seconds). Make sure your server/proxy read timeout and the client's request timeout both exceed it, or a successful payment may never be served.
 
