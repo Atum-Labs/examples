@@ -1,0 +1,272 @@
+ATUM LABS, INC. - EXAMPLES REPOSITORY PROPRIETARY REFERENCE IMPLEMENTATION LICENSE AGREEMENT
+
+Last Updated: July 23, 2026
+
+This Atum Labs, Inc. Examples Repository Proprietary Reference Implementation License Agreement ("Agreement") governs access to and use of the private GitHub repository currently located at github.com/Atum-Labs/examples, together with all current and future source code, sample applications, reference implementations, snippets, scripts, configuration files, environment templates, tests, CI/CD workflows, documentation, diagrams, data, and other materials included in that repository (collectively, the "Repository Materials"), except for any material that expressly states that it is governed by a different license.
+
+This Agreement is a proprietary license and is not an open source license.
+
+By accessing, cloning, downloading, copying, viewing, running, modifying, contributing to, or otherwise using any Repository Materials, you agree to this Agreement both individually and, if applicable, on behalf of the company or other legal entity for which you act (the "Licensee"). You represent that you have authority to bind Licensee. If you do not agree or lack that authority, do not access or use the Repository Materials.
+
+1. PURPOSE AND STATUS OF THE REPOSITORY
+
+1.1 Authorized Purpose. Atum makes the Repository Materials available solely to enable Licensee to:
+
+(a) evaluate and understand Atum-authorized products, services, APIs, software development kits, packages, payment flows, and integration patterns;
+
+(b) study, copy, run, test, adapt, and modify the Repository Materials to design and develop Licensee's own software applications that interoperate with Atum-authorized products or services (each, a "Licensee Application");
+
+(c) test, demonstrate, validate, deploy, maintain, and operate a Licensee Application, including in production, subject to any separate rights required to access or use applicable Atum packages, APIs, services, networks, contracts, or other resources; and
+
+(d) conduct an Atum-authorized pilot, proof of concept, security review, operational-readiness review, or integration assessment relating to a Licensee Application.
+
+The activities in Sections 1.1(a) through 1.1(d) are the "Authorized Purpose." No other purpose is permitted.
+
+1.2 Reference implementations only. The Repository Materials are examples and reference implementations intended to assist developers in building their own applications. They are not, merely by being included in the Repository, a production release, supported product, authoritative specification, certification, or promise of continued availability, compatibility, maintenance, monitoring, or support.
+
+1.3 Supported configurations. Licensee may use the Repository Materials only with the packages, versions, endpoints, services, chains, assets, corridors, contracts, credentials, and configurations that Atum then designates for the applicable use. The presence of any package reference, endpoint, service, chain, asset, corridor, contract, configuration, or code path in the Repository does not by itself mean that it is available, authorized, current, or supported. Repository documentation may impose narrower technical or operational conditions but does not expand the rights granted by this Agreement.
+
+1.4 Expanding library. Unless a file or directory expressly states otherwise, this Agreement applies to all examples and other Repository Materials later added to the Repository, as well as the Repository Materials present on the Last Updated date above.
+
+2. LICENSE GRANT
+
+2.1 Repository license. Subject to Licensee's continuing compliance with this Agreement and Atum's continuing authorization of Licensee's repository access, Atum grants Licensee, during the period in which such access remains authorized, a limited, revocable, non-exclusive, non-transferable, non-sublicensable license to:
+
+(a) permit Licensee personnel and individual contractors who have a legitimate need to know, are authorized by Atum to access the Repository, and are bound by written obligations at least as protective as this Agreement ("Authorized Users") to access and clone the Repository into Licensee-controlled, secure systems;
+
+(b) internally view, copy, run, test, evaluate, adapt, and modify the Repository Materials solely for the Authorized Purpose;
+
+(c) create modifications and derivative works of the Repository Materials solely as reasonably necessary to design, build, test, validate, deploy, maintain, and operate a Licensee Application;
+
+(d) incorporate portions of the Repository Materials into a Licensee Application solely to the extent reasonably necessary for the Licensee Application to interoperate with Atum-authorized products or services;
+
+(e) deploy and operate a Licensee Application, including in production, solely for the Authorized Purpose; and
+
+(f) make a reasonable number of secure backup copies solely for disaster recovery and continuity of the Authorized Purpose.
+
+2.2 No distribution of reference library. Licensee may distribute or make a Licensee Application available to its own users or customers only in compiled, hosted, or otherwise non-source form that does not expose, disclose, or permit extraction or separate reuse of the Repository Materials. No right is granted to distribute the Repository Materials in source form, publish them as examples or templates, provide them as a standalone library or implementation kit, or allow any third party to extract, reuse, or separately exploit them.
+
+2.3 Continuing application rights after access ends. If Atum suspends, revokes, or otherwise ends Licensee's Repository access for convenience and not because of Licensee's breach, Licensee may continue to operate and maintain a Licensee Application developed in compliance with this Agreement before access ended, provided that Licensee:
+
+(a) ceases all further Repository access and all new development using standalone copies of the Repository Materials;
+
+(b) does not expose, disclose, distribute, or permit extraction or separate reuse of the Repository Materials;
+
+(c) continues to comply with Sections 4 through 12, 14, 16, and 17 and all other provisions that by their nature continue to apply;
+
+(d) maintains any separate authorization required to use applicable Atum packages, APIs, services, networks, contracts, or other resources; and
+
+(e) does not use retained Repository Materials to build new applications, new integrations, or material new functionality after Repository access ends.
+
+For clarity, ending Repository access does not itself terminate any separately granted right to use an Atum package, API, service, network, or other resource, and termination of such a separate right does not itself require Licensee to discontinue portions of a Licensee Application that do not depend on that resource.
+
+2.4 No implied rights. No other rights are granted, whether by implication, estoppel, exhaustion, or otherwise.
+
+3. ACCESS CONTROL AND AUTHORIZED USERS
+
+3.1 Repository access is personal to each Authorized User. Licensee must not share accounts, credentials, access tokens, clones, archives, or repository content with anyone who is not an Authorized User.
+
+3.2 Licensee must use least-privilege access, multi-factor authentication where available, secure endpoint controls, and reasonable procedures for promptly removing access when an Authorized User no longer needs it or ceases working for Licensee.
+
+3.3 Licensee must not add collaborators, transfer repository access, or give an affiliate, customer, vendor, consultant, or other third party access without Atum's prior written approval.
+
+3.4 GitHub access authorization is an access-control mechanism only. It does not expand the license granted by this Agreement or authorize use outside the Authorized Purpose.
+
+4. SEPARATE RIGHTS AND OPERATIONAL DEPENDENCIES
+
+4.1 Access to the Repository does not grant Licensee any right to access or use any Atum package registry, package, SDK, API, payment gateway, facilitator, settlement network, contract, service, hosted environment, credential, test funds, support channel, monitoring system, or other Atum resource. Those items may require separate technical access and are governed by their own licenses, agreements, documentation, and authorization requirements.
+
+4.2 Licensee is responsible for obtaining all required package, service, network, wallet, credential, and environment access before running an example or operating a Licensee Application. Licensee must not attempt to bypass access controls or infer authorization from documentation that references a restricted resource.
+
+4.3 Licensee is solely responsible for validating its configuration, package versions, wallet addresses, private keys, balances, transaction parameters, chain and asset selections, expected outputs, monitoring, and operational readiness before using any Repository Materials or Licensee Application with real funds, production data, or production systems.
+
+4.4 Atum has no obligation under this Agreement to provide onboarding, support, maintenance, updates, compatibility fixes, service levels, test funds, credentials, monitoring, incident response, or certification of any deployment.
+
+5. RESTRICTIONS
+
+Licensee must not, and must not permit any third party to:
+
+5.1 use the Repository Materials for any purpose outside the Authorized Purpose;
+
+5.2 disclose, publish, post, transmit, provide, or otherwise make any Repository Materials available to any person who is not an Authorized User, except for permitted non-source distribution of a Licensee Application under Section 2.2;
+
+5.3 place any Repository Materials in a public repository, public fork, public mirror, public package registry, public website, public forum, public artifact, or any location accessible to unauthorized persons;
+
+5.4 sell, rent, lease, sublicense, assign, distribute, commercialize, or provide the Repository Materials as a standalone product, service, library, template, training asset, example collection, reference implementation collection, or implementation kit;
+
+5.5 use the Repository Materials to build, train, support, operate, or improve a product or service whose primary purpose is to compete with Atum's payment gateway, facilitator, settlement network, payment-rail system, intent-processing system, transaction-routing system, signing service, SDK, or integration toolkit; provided that this restriction does not prohibit Licensee from developing and commercializing a Licensee Application that uses or interoperates with Atum-authorized products or services for its intended business purpose;
+
+5.6 access or use an Atum service, package, registry, endpoint, environment, or network beyond the scope of Licensee's separate authorization, or circumvent any access control, authentication requirement, rate limit, usage restriction, fee, package entitlement, or technical safeguard;
+
+5.7 use the Repository Materials to discover, map, probe, exploit, or disclose nonpublic Atum systems, credentials, endpoints, architecture, security controls, or operational information beyond what is necessary for the Authorized Purpose;
+
+5.8 conduct vulnerability scanning, penetration testing, load testing, security testing, or adversarial testing against Atum systems without Atum's prior written authorization;
+
+5.9 create, sign, submit, relay, or facilitate forged, unauthorized, incomplete, misleading, malicious, duplicated, replayed, or otherwise invalid payment requests, messages, signatures, transactions, settlement instructions, or gateway requests;
+
+5.10 modify or use the Repository Materials in a manner that disables, bypasses, weakens, or misrepresents validation, authentication, authorization, signing, nonce handling, replay protection, deadline enforcement, chain or asset validation, destination verification, logging, monitoring, or other safety or security controls;
+
+5.11 commit, embed, expose, or disclose private keys, signing keys, seed phrases, API keys, access tokens, credentials, customer data, personal data, or other secrets in the Repository or any derivative, log, issue, pull request, CI artifact, or shared output;
+
+5.12 use any Repository Materials, related documentation, outputs, comments, structure, workflows, or metadata to train, fine-tune, evaluate, benchmark, or improve any artificial intelligence, machine-learning, large-language-model, or automated code-generation system, except for ordinary code-completion tools that do not retain or use the Repository Materials to train or improve a model and that are approved under Licensee's confidentiality and security policies;
+
+5.13 remove, alter, conceal, or obscure any copyright, proprietary, license, confidentiality, attribution, warning, or security notice;
+
+5.14 use Atum's names, logos, trademarks, service marks, or branding, or imply Atum endorsement, certification, partnership, or support, without Atum's prior written consent; or
+
+5.15 use the Repository Materials in violation of applicable law, regulation, sanctions, export controls, third-party rights, Atum instructions, or any separate agreement with Atum.
+
+6. OWNERSHIP; LICENSEE APPLICATIONS; FEEDBACK
+
+6.1 Atum ownership. Atum and its licensors retain all right, title, and interest in and to the Repository Materials, including all copyrights, trade secrets, patents, trademarks, know-how, architecture, workflows, schemas, examples, documentation, and other intellectual-property rights embodied in or relating to them. No ownership rights in the Repository Materials are transferred to Licensee.
+
+6.2 Modifications to Repository Materials. As between Atum and Licensee, Atum owns the Repository Materials and all modifications and derivative works of the Repository Materials themselves. To the extent Licensee acquires any right, title, or interest in a modification or derivative work of the Repository Materials, Licensee hereby assigns that right, title, and interest to Atum. If an assignment is ineffective under applicable law, Licensee grants Atum and its affiliates a perpetual, irrevocable, worldwide, transferable, sublicensable, royalty-free license to use, reproduce, modify, create derivative works from, distribute, publicly perform, publicly display, make, have made, sell, offer for sale, import, and otherwise exploit that modification or derivative work for any purpose.
+
+6.3 Licensee ownership. As between the parties, Licensee owns the software, content, interfaces, business logic, and other materials in a Licensee Application that Licensee develops independently and that are separable from the Repository Materials ("Licensee Materials"). Licensee Materials exclude the Repository Materials, modifications and derivative works of the Repository Materials, Atum Confidential Information, Atum trademarks, and other Atum intellectual property. Nothing in this Agreement transfers ownership of Licensee Materials to Atum.
+
+6.4 Incorporated Repository Materials. Any Repository Materials incorporated into a Licensee Application remain owned by Atum, remain subject to this Agreement, and may not be separately accessed, extracted, reused, disclosed, sublicensed, or distributed except as expressly permitted by Section 2.2.
+
+6.5 Feedback and voluntary submissions. Unless Atum requires a separate written contribution agreement before accepting a particular submission, if Licensee or an Authorized User voluntarily provides Atum with ideas, suggestions, bug reports, fixes, patches, code, documentation, tests, improvements, or other materials relating to the Repository Materials (collectively, "Feedback"), Licensee grants Atum and its affiliates a perpetual, irrevocable, worldwide, transferable, sublicensable, royalty-free license to use, reproduce, modify, create derivative works from, distribute, publicly perform, publicly display, make, have made, sell, offer for sale, import, and otherwise exploit the Feedback for any purpose. Licensee represents that it has all rights necessary to provide the Feedback and grant this license and that, to Licensee's knowledge, the Feedback does not infringe third-party rights. Atum may use the Feedback without restriction, attribution, or compensation, provided Atum does not identify Licensee as the source without permission.
+
+6.6 Future contribution agreement. Atum may decline to review or accept any Feedback. Atum may also require a separate contributor or contribution agreement as a condition of reviewing or accepting future submissions. Any such requirement will apply prospectively to submissions made after Atum gives notice of the requirement, unless the parties agree otherwise in writing.
+
+7. THIRD-PARTY MATERIALS AND SEPARATELY LICENSED ATUM SOFTWARE
+
+7.1 The Repository may reference, import, install, or include third-party software or materials. Those materials are governed by their applicable third-party licenses. Nothing in this Agreement limits rights that a third-party license independently grants or relieves Licensee of obligations that such a license imposes.
+
+7.2 Atum packages, SDKs, APIs, services, contracts, and other software referenced by an example are not licensed under this Agreement unless they are themselves included in the Repository and do not carry separate terms. Their separate license and access terms control.
+
+7.3 If a specific file includes a different license notice, that notice governs that file to the extent of any direct conflict. All other Repository Materials remain governed by this Agreement.
+
+8. CONFIDENTIALITY
+
+8.1 The Repository Materials, nonpublic repository discussions, access methods, credentials, configurations, architecture, workflows, schemas, test data, operational information, security information, and all nonpublic materials made available in connection with the Repository are "Atum Confidential Information."
+
+8.2 Licensee must:
+
+(a) use Atum Confidential Information only for the Authorized Purpose;
+
+(b) protect it with at least the same degree of care Licensee uses for its own confidential information of similar sensitivity, and no less than reasonable care;
+
+(c) disclose it only to Authorized Users with a legitimate need to know;
+
+(d) not copy it except as reasonably necessary for the Authorized Purpose;
+
+(e) promptly notify Atum of any actual or suspected unauthorized access, use, disclosure, loss, compromise, or security incident; and
+
+(f) cooperate reasonably with Atum in investigating and mitigating any such incident.
+
+8.3 Atum Confidential Information does not include information that Licensee can demonstrate through contemporaneous written records: (a) became public through no breach of this Agreement; (b) was lawfully known to Licensee without a duty of confidentiality before disclosure by Atum; (c) was lawfully received from a third party without confidentiality restriction; or (d) was independently developed without use of or reference to Atum Confidential Information.
+
+8.4 If Licensee is legally compelled to disclose Atum Confidential Information, Licensee must, to the extent legally permitted, give Atum prompt written notice and reasonable assistance in seeking confidential treatment or a protective order. Licensee may disclose only the minimum information legally required.
+
+8.5 If an applicable Customer Agreement, as defined in Section 16.1, includes confidentiality terms, those terms control over this Section to the extent of a direct conflict, and this Section supplements them in all other respects.
+
+9. SECURITY AND RESPONSIBLE USE
+
+9.1 Licensee must maintain industry-standard administrative, technical, and physical safeguards appropriate to the sensitivity of the Repository Materials and the risks of payment and digital-asset software.
+
+9.2 Credentials, private keys, signing keys, API keys, access tokens, wallet secrets, and other sensitive configuration must be stored only in secure secret-management systems and must never be committed to source control or included in shared logs or artifacts.
+
+9.3 When testing, Licensee must use only wallets, accounts, keys, funds, data, and systems that Licensee is authorized to use. Licensee should use least-privilege credentials and tightly limited balances appropriate to the test.
+
+9.4 Licensee is responsible for the acts and omissions of its Authorized Users and for all activity conducted through Licensee-controlled accounts, credentials, wallets, and infrastructure.
+
+9.5 Upon Atum's reasonable request, Licensee will identify its Authorized Users and certify its compliance with this Agreement, including deletion obligations.
+
+10. COMPLIANCE WITH ATUM INSTRUCTIONS
+
+10.1 Licensee must comply with Atum's then-current written technical, security, operational, and compliance instructions that apply to the Authorized Purpose.
+
+10.2 Licensee must operate examples and Licensee Applications only against Atum-authorized services, contracts, endpoints, packages, chains, assets, corridors, wallets, and signing configurations.
+
+10.3 If Atum identifies a vulnerability, unsafe configuration, unsupported use, or material risk, Atum may require Licensee to stop using affected Repository Materials immediately until Atum authorizes resumed use. This Section does not require Licensee to discontinue unaffected portions of a Licensee Application that do not contain or depend upon the affected Repository Materials or Atum resource.
+
+11. NO SUPPORT COMMITMENT; DISCLAIMER OF WARRANTIES
+
+11.1 THE REPOSITORY MATERIALS ARE PROVIDED "AS IS," "AS AVAILABLE," "WITH ALL FAULTS," AND FOR REFERENCE PURPOSES ONLY.
+
+11.2 TO THE MAXIMUM EXTENT PERMITTED BY LAW, ATUM AND ITS LICENSORS DISCLAIM ALL EXPRESS, IMPLIED, STATUTORY, AND OTHER WARRANTIES, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, COMPLETENESS, SECURITY, RELIABILITY, COMPATIBILITY, AND QUIET ENJOYMENT, AND ANY WARRANTIES ARISING FROM COURSE OF DEALING, USAGE, OR TRADE PRACTICE.
+
+11.3 ATUM DOES NOT WARRANT THAT THE REPOSITORY MATERIALS ARE CURRENT, COMPLETE, ERROR-FREE, SECURE, UNINTERRUPTED, SUITABLE FOR PRODUCTION, COMPATIBLE WITH ANY PACKAGE OR SERVICE, OR SUFFICIENT TO SATISFY ANY LEGAL, REGULATORY, SECURITY, ACCOUNTING, TAX, AUDIT, OR COMPLIANCE REQUIREMENT.
+
+11.4 ATUM MAY CHANGE, REPLACE, SUSPEND, OR REMOVE ANY REPOSITORY MATERIAL, PACKAGE REFERENCE, CONFIGURATION, OR EXAMPLE AT ANY TIME. NO ROADMAP, COMMENT, EXAMPLE, DEMONSTRATION, OR DOCUMENTATION CREATES A COMMITMENT TO DELIVER, MAINTAIN, OR SUPPORT ANY FEATURE, SERVICE, INTEGRATION, OR CONFIGURATION.
+
+11.5 LICENSEE IS SOLELY RESPONSIBLE FOR REVIEWING, TESTING, SECURING, MONITORING, AND VALIDATING ITS USE OF THE REPOSITORY MATERIALS AND ANY LICENSEE APPLICATION, INCLUDING ALL TRANSACTIONS, WALLET ADDRESSES, KEYS, FUNDS, CONFIGURATIONS, DEPENDENCIES, AND OUTPUTS.
+
+12. LIMITATION OF LIABILITY
+
+12.1 TO THE MAXIMUM EXTENT PERMITTED BY LAW, ATUM, ITS AFFILIATES, AND THEIR RESPECTIVE LICENSORS, OFFICERS, DIRECTORS, EMPLOYEES, CONTRACTORS, AND AGENTS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, BUSINESS, GOODWILL, DATA, CREDENTIALS, DIGITAL ASSETS, TOKENS, FUNDS, TRANSACTION VALUE, SETTLEMENT OPPORTUNITY, OR BUSINESS INTERRUPTION, ARISING OUT OF OR RELATING TO THE REPOSITORY MATERIALS OR THIS AGREEMENT, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+12.2 ATUM WILL NOT BE LIABLE FOR UNAUTHORIZED, FAILED, DUPLICATED, REPLAYED, DELAYED, MISROUTED, OR INCORRECT TRANSACTIONS; INCORRECT ADDRESS, CHAIN, ASSET, CORRIDOR, AMOUNT, DEADLINE, OR CONFIGURATION SELECTION; PRIVATE-KEY OR CREDENTIAL MISUSE; PACKAGE OR DEPENDENCY FAILURE; SMART-CONTRACT OR BLOCKCHAIN FAILURE; NETWORK CONGESTION; THIRD-PARTY SERVICE FAILURE; OR LICENSEE'S FAILURE TO FOLLOW ATUM DOCUMENTATION OR INSTRUCTIONS, EXCEPT TO THE EXTENT LIABILITY CANNOT BE EXCLUDED BY LAW.
+
+12.3 TO THE MAXIMUM EXTENT PERMITTED BY LAW, ATUM'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATING TO THE REPOSITORY MATERIALS OR THIS AGREEMENT WILL NOT EXCEED THE GREATER OF (A) ONE HUNDRED U.S. DOLLARS (US $100) OR (B) THE AMOUNTS LICENSEE PAID ATUM SPECIFICALLY FOR ACCESS TO THE REPOSITORY DURING THE TWELVE MONTHS BEFORE THE EVENT GIVING RISE TO LIABILITY.
+
+12.4 THE LIMITATIONS IN THIS SECTION APPLY REGARDLESS OF THE FORM OF ACTION AND EVEN IF A LIMITED REMEDY FAILS OF ITS ESSENTIAL PURPOSE. THEY DO NOT LIMIT LIABILITY THAT CANNOT LAWFULLY BE LIMITED OR EXCLUDED.
+
+13. TERM, ACCESS REVOCATION, SUSPENSION, AND TERMINATION
+
+13.1 Subject to Section 16.1, this Agreement begins when Licensee first accesses the Repository Materials (the "Effective Date") and continues until terminated (the "Term").
+
+13.2 Discretionary access. Atum may suspend or revoke Licensee's access to the Repository at any time, with or without cause or advance notice. Repository access is discretionary and does not create any entitlement to continued access, updates, maintenance, support, or future examples.
+
+13.3 Suspension for risk. Atum may suspend access to the Repository or require Licensee to stop using affected Repository Materials immediately if Atum reasonably believes there is a breach, security risk, unauthorized use, legal risk, threat to Atum systems or users, or other material risk.
+
+13.4 Termination. Except to the extent an applicable Customer Agreement provides otherwise, either party may terminate this Agreement for convenience on ten days' written notice. Atum may terminate immediately upon: (a) breach of Sections 2 through 10; (b) unauthorized disclosure, public posting, competitive misuse, or unauthorized security testing; (c) infringement or misappropriation of Atum intellectual property; (d) Licensee no longer being an authorized Atum customer, partner, pilot participant, or collaborator; or (e) termination or expiration of the relationship or separate agreement that supported Licensee's access.
+
+13.5 Effect of convenience revocation or termination. If Repository access is revoked or this Agreement is terminated for convenience and not because of Licensee's breach:
+
+(a) Licensee must immediately cease accessing the Repository and cease using standalone copies of the Repository Materials for new development;
+
+(b) Licensee must delete standalone clones, forks, archives, and copies of the Repository Materials that are not reasonably necessary to operate or maintain a Licensee Application developed before access ended;
+
+(c) Repository Materials retained within or reasonably necessary to operate or maintain such a Licensee Application remain subject to this Agreement and may not be separately accessed, extracted, reused, disclosed, sublicensed, or distributed;
+
+(d) Licensee may continue operating and maintaining that Licensee Application only in accordance with Section 2.3; and
+
+(e) upon Atum's reasonable request, Licensee must certify compliance with this Section.
+
+13.6 Effect of termination for breach or risk. If Atum terminates this Agreement or revokes access because of Licensee's breach, unauthorized disclosure, competitive misuse, security threat, infringement, misappropriation, or unlawful conduct, Atum may require Licensee to:
+
+(a) immediately cease all access to and use of the Repository Materials;
+
+(b) stop operating, distributing, or making available any Licensee Application to the extent it contains, exposes, depends upon, or was developed through material misuse of the Repository Materials;
+
+(c) remove the Repository Materials and all modifications and derivative works of them from active systems, deployments, CI/CD systems, developer devices, and shared storage;
+
+(d) destroy all copies, clones, forks, archives, caches, backups, build artifacts, container images, compiled forms, and derivatives containing Repository Materials, except for one inaccessible archival copy retained solely if required by law; and
+
+(e) certify destruction and cessation in writing upon Atum's request.
+
+13.7 Separate Atum resources. Suspension, revocation, or termination of Repository access does not prevent Atum from separately suspending, revoking, or terminating Licensee's access to any Atum package, API, service, network, contract, credential, or other resource in accordance with the terms governing that resource.
+
+13.8 Survival. Termination does not affect rights or obligations accrued before termination. Sections 2.2 through 2.4, 4 through 12, 13.5 through 13.8, 14, 16, 17, and any provisions that by their nature should survive will survive termination.
+
+14. RELATIONSHIP; NO ENDORSEMENT
+
+The parties are independent contractors. This Agreement does not create a partnership, joint venture, agency, fiduciary, franchise, or employment relationship. Licensee may not make public statements about its use of the Repository, identify Atum as a customer or partner, or imply endorsement, certification, production readiness, or support without Atum's prior written consent.
+
+15. GOVERNING LAW AND VENUE
+
+Subject to Section 16.1, this Agreement is governed by the laws of the State of Delaware, without regard to conflict-of-law principles. The state and federal courts located in Delaware will have exclusive jurisdiction over disputes arising out of or relating to this Agreement, and each party consents to personal jurisdiction and venue in those courts.
+
+16. ORDER OF PRECEDENCE; ENTIRE AGREEMENT; AMENDMENTS
+
+16.1 If Licensee and Atum are parties to a separately signed written agreement governing their customer, partner, pilot, confidentiality, product, service, or similar relationship (a "Customer Agreement"), the Customer Agreement controls to the extent of any direct conflict with this Agreement, including with respect to confidentiality, governing law, venue, dispute resolution, suspension, and termination. Except to the extent the Customer Agreement expressly modifies rights in the Repository Materials, this Agreement continues to govern the license to and use of the Repository Materials. A general right to use an Atum product or service does not, by itself, grant rights in the Repository Materials.
+
+16.2 A license or other agreement for a particular Atum package, SDK, API, service, contract, or other resource governs only that resource. A third-party license governs only the applicable third-party material. A file-specific license governs only the applicable file or material to the extent stated in that license.
+
+16.3 This Agreement, together with any applicable Customer Agreement and any applicable resource-specific or file-specific terms, constitutes the entire agreement concerning the Repository Materials and supersedes prior or contemporaneous statements concerning their license or use.
+
+16.4 Subject to any applicable Customer Agreement, Atum may update this Agreement by placing a revised version in the root of the Repository and providing reasonable notice to Licensee. The revised version applies prospectively from its stated effective date. Continued access or use after that date constitutes acceptance. Any other amendment or waiver must be in writing and signed by an authorized representative of Atum.
+
+16.5 A waiver of one breach is not a waiver of any other breach. If any provision is held unenforceable, it will be enforced to the maximum extent permitted and the remaining provisions will remain in effect. Headings are for convenience only.
+
+17. ASSIGNMENT AND RESERVATION OF RIGHTS
+
+17.1 Licensee may not assign, delegate, transfer, or sublicense this Agreement or any right under it, whether by operation of law, merger, change of control, asset sale, or otherwise, without Atum's prior written consent. Any prohibited assignment is void. Atum may assign this Agreement in connection with a merger, reorganization, financing, sale of assets, or transfer to an affiliate or successor.
+
+17.2 All rights not expressly granted in this Agreement are reserved by Atum and its licensors.
+
+ATUM LABS, INC.
+All rights reserved.
