@@ -52,6 +52,8 @@ Edit `.env`:
 | `MERCHANT_URL` | No | URL of the MPP-gated resource. Defaults to `http://localhost:4030/paid`. |
 | `RPC_URL` | No | Source-chain RPC URL (pre-set to Base Sepolia, `https://sepolia.base.org`). When set, the client approves the source token (Permit2) before paying; clear it against the stub merchant. |
 
+> **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
+
 ### 3. Run the client
 
 ```bash
