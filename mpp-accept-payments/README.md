@@ -20,16 +20,18 @@ By default this example uses a **stub submitter** that returns a canned confirma
 
 - Node.js 20+
 - npm
+- An npm account granted `@atumlabs` access — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
 
 ## Quickstart
 
 ### 1. Install dependencies
 
 ```bash
+npm login    # an account granted @atumlabs access
 npm install
 ```
 
-> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). You'll need npm access granted to install it — [contact us](mailto:support@atumlabs.xyz) for access, then run `npm login` before `npm install`.
+> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without `npm login` first, the install fails with a `403`/`404` on that package.
 
 ### 2. Configure environment
 
