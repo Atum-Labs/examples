@@ -46,6 +46,8 @@ Edit `.env`:
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client preflights your Permit2 allowance before signing. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
 
+> **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
+
 ### 3. Run the client
 
 ```bash
