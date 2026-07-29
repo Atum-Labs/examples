@@ -37,6 +37,10 @@ The default corridor is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real
 
 Where authorized by Atum, the same examples run against mainnet: set the stub flag to `false`, point the gateway and facilitator URLs at the production endpoints Atum provides, and set the corridor to Atum-authorized mainnet chains and tokens. Contact Atum for production access and URLs.
 
+## Evaluating settlement (Base ↔ Tempo)
+
+Assessing whether Atum's Base ↔ Tempo settlement is real and reliable enough to run **underneath your own orchestration, credential, or guarantee layer** — rather than acting as a merchant or payer yourself? See **[Settlement proof: Base ↔ Tempo over x402 and MPP](docs/settlement-proof.md)**. It walks through a self-serve, on-chain-verifiable real settlement for both protocols, the reliability differences between them, and what the examples deliberately leave to the layer above the rail.
+
 ## License
 
 This repository contains proprietary Atum Labs reference implementations provided to approved developers to help them build applications that interoperate with Atum products and services.

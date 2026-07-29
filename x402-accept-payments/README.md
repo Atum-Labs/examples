@@ -91,7 +91,7 @@ Running it in your own private CI: provide an automation token with read access 
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
 > ```
 >
-> It asserts a real on-chain settlement and fails if it detects the stub, so it can never give a false pass.
+> It asserts a real on-chain settlement and fails if it detects the stub, so it can never give a false pass. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
 > **x402 settles synchronously.** The x402 facilitator (v1) confirms settlement only within the gateway's synchronous window (~30s, the server-side `payment_sync_wait_seconds`) — it has no async tail. If a corridor settles slower than that window, `/settle` returns `"settlement did not complete synchronously; the async tail is not supported in v1"` and the payment continues settling asynchronously without a synchronous confirmation. (This is the key difference from MPP, whose merchant polls the gateway for the async tail.) In that case the real e2e reports the limitation; set `ALLOW_ASYNC_TAIL=1` to treat a clean submission as a conditional pass (wiring verified up to submission).
 

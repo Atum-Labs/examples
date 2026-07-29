@@ -70,6 +70,14 @@ This boots the merchant (in stub mode) and drives real payments against it using
 
 > This test drives the `mpp-make-payments` client too, so make sure you've also run `npm install` in [`../mpp-make-payments`](../mpp-make-payments) before running it.
 
+> The end-to-end test that settles against the live gateway is **opt-in** — it moves real testnet funds. Run it with a funded Base Sepolia wallet and a Tempo receiving address:
+>
+> ```bash
+> RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
+> ```
+>
+> It asserts a real on-chain Base → Tempo settlement (a hex payment id plus source-deposit and destination-payout tx links) and fails if it detects the stub, so it can never give a false pass. A fresh `MPP_SECRET_KEY` is generated per run; optional overrides: `GATEWAY_URL`, `RPC_URL` (defaults to Base Sepolia), `FULFILLMENT_DEADLINE_SECONDS`. Unlike x402 v1, the MPP merchant polls the gateway past its synchronous window, so a slow cross-chain corridor still resolves to a confirmed result. For the full walkthrough and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
+
 ## Going to testnet / mainnet
 
 The shipped `.env.example` is already wired for a live **testnet** corridor — it accepts **Base Sepolia USDC** and delivers **Tempo (Moderato) pathUSD**, settling through Atum's testnet gateway (`GATEWAY_URL=https://payment-gw.production-testnet.atum.xyz`). To settle for real instead of the stub, change three values in `.env`:
