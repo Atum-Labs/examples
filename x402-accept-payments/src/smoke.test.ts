@@ -284,7 +284,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
       const merchantLog = output();
       assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
       assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
-      assert.match(merchantLog, /source deposit:.*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
+      assert.match(merchantLog, /(source deposit|destination payout|settlement tx):\s+\S*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
       printSettlementReport("x402", dir, merchantLog);
       return;
     }
