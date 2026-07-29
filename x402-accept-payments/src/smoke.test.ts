@@ -249,9 +249,9 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
   const bar = "─".repeat(72);
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED (${dir.label})\n` +
+      `  ✅ ${protocol} — SETTLED (${dir.label})\n` +
       `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
-      `     amount:              ${amount} (atomic) paid to ${dest}\n` +
+      `     expected amount:     ${amount} (atomic) to ${dest}  — confirm on-chain below\n` +
       `     source deposit:      ${deposit}\n` +
       (payout ? `     destination payout:  ${payout}\n` : "") +
       `${bar}\n\n`,
