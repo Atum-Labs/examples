@@ -221,6 +221,62 @@ test("refuses to start in real-settlement mode without a valid DEST_ADDRESS", as
 // GATEWAY_URL, RPC_URL (defaults to Base Sepolia), FULFILLMENT_DEADLINE_SECONDS.
 const REAL_E2E_ENABLED = process.env.RUN_REAL_E2E === "1" && !!process.env.PRIVATE_KEY;
 
+// The MPP merchant polls the gateway past its synchronous window until settlement is
+// terminal, so a real cross-chain run can take 60–120s. The polling happens in a child
+// process whose logs are captured (not echoed), so print elapsed seconds while we wait —
+// otherwise the terminal looks frozen.
+async function withHeartbeat<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  process.stdout.write(`  ⏳ ${label}: settling on-chain (merchant is polling the gateway)…\n`);
+  const timer = setInterval(() => {
+    process.stdout.write(`  ⏳ ${label}: still settling — ${Math.round((Date.now() - start) / 1000)}s elapsed\n`);
+  }, 10_000);
+  timer.unref?.();
+  try {
+    return await fn();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+// Human labels for the shipped corridor, so the final report reads as chains/tokens
+// rather than raw CAIP-2 ids. Falls back to the raw value for anything not listed.
+const CHAIN_NAMES: Record<string, string> = {
+  "eip155:84532": "Base Sepolia",
+  "eip155:42431": "Tempo (Moderato)",
+};
+const ASSET_NAMES: Record<string, string> = {
+  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
+  "0x20c0000000000000000000000000000000000000": "pathUSD",
+};
+function endpointLabel(network: string, asset: string): string {
+  return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
+}
+
+// Final "what settled where" summary, pulled from the merchant's own settlement log.
+function printSettlementReport(protocol: string, merchantLog: string): void {
+  const srcNet = process.env.SOURCE_NETWORK ?? "eip155:84532";
+  const srcAsset = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  const dstNet = process.env.DEST_NETWORK ?? "eip155:42431";
+  const dstAsset = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000";
+  const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
+  const dest = process.env.DEST_ADDRESS ?? "(unset)";
+  const paymentId = merchantLog.match(/settled payment (\S+)/)?.[1];
+  const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1] ?? "(see merchant log)";
+  const payout = merchantLog.match(/destination payout:\s*(\S+)/)?.[1];
+  const bar = "─".repeat(72);
+  process.stdout.write(
+    `\n${bar}\n` +
+      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED\n` +
+      (paymentId ? `     payment id:          ${paymentId}\n` : "") +
+      `     corridor:            ${endpointLabel(srcNet, srcAsset)}  →  ${endpointLabel(dstNet, dstAsset)}\n` +
+      `     amount:              ${amount} (atomic) paid to ${dest}\n` +
+      `     source deposit:      ${deposit}\n` +
+      (payout ? `     destination payout:  ${payout}\n` : "") +
+      `${bar}\n\n`,
+  );
+}
+
 test(
   "real e2e: settles a real Base -> Tempo payment through the gateway",
   { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
@@ -237,11 +293,13 @@ test(
       merchantEnv.FULFILLMENT_DEADLINE_SECONDS = process.env.FULFILLMENT_DEADLINE_SECONDS;
 
     await withMerchant(4099, merchantEnv, async ({ url, output }) => {
-      const result = await runClient({
-        PRIVATE_KEY: privateKey,
-        MERCHANT_URL: url,
-        RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
-      });
+      const result = await withHeartbeat("MPP real settlement", () =>
+        runClient({
+          PRIVATE_KEY: privateKey,
+          MERCHANT_URL: url,
+          RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
+        }),
+      );
 
       assertPaid(result, "real client");
 
@@ -255,6 +313,7 @@ test(
         /settled payment 0x[0-9a-f]/i,
         `expected a real on-chain settlement in the merchant log:\n${merchantLog}`,
       );
+      printSettlementReport("MPP", merchantLog);
     });
   },
 );

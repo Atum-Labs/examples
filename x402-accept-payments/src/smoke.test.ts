@@ -176,6 +176,59 @@ test("refuses to start in real mode without a valid DEST_ADDRESS", async () => {
 // RPC_URL (defaults to Base Sepolia).
 const REAL_E2E_ENABLED = process.env.RUN_REAL_E2E === "1" && !!process.env.PRIVATE_KEY;
 
+// Cross-chain settlement runs in child processes whose logs are captured (not echoed),
+// so the terminal would otherwise look frozen for 30s+. Print elapsed seconds while we
+// wait, so it's clear the run is still progressing rather than hung.
+async function withHeartbeat<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  process.stdout.write(`  ⏳ ${label}: settling on-chain…\n`);
+  const timer = setInterval(() => {
+    process.stdout.write(`  ⏳ ${label}: still settling — ${Math.round((Date.now() - start) / 1000)}s elapsed\n`);
+  }, 10_000);
+  timer.unref?.();
+  try {
+    return await fn();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+// Human labels for the shipped corridor, so the final report reads as chains/tokens
+// rather than raw CAIP-2 ids. Falls back to the raw value for anything not listed.
+const CHAIN_NAMES: Record<string, string> = {
+  "eip155:84532": "Base Sepolia",
+  "eip155:42431": "Tempo (Moderato)",
+};
+const ASSET_NAMES: Record<string, string> = {
+  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
+  "0x20c0000000000000000000000000000000000000": "pathUSD",
+};
+function endpointLabel(network: string, asset: string): string {
+  return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
+}
+
+// Final "what settled where" summary, pulled from the merchant's own settlement log.
+function printSettlementReport(protocol: string, merchantLog: string): void {
+  const srcNet = process.env.SOURCE_NETWORK ?? "eip155:84532";
+  const srcAsset = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  const dstNet = process.env.DEST_NETWORK ?? "eip155:42431";
+  const dstAsset = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000";
+  const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
+  const dest = process.env.DEST_ADDRESS ?? "(unset)";
+  const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1] ?? "(see merchant log)";
+  const payout = merchantLog.match(/destination payout:\s*(\S+)/)?.[1];
+  const bar = "─".repeat(72);
+  process.stdout.write(
+    `\n${bar}\n` +
+      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED\n` +
+      `     corridor:            ${endpointLabel(srcNet, srcAsset)}  →  ${endpointLabel(dstNet, dstAsset)}\n` +
+      `     amount:              ${amount} (atomic) paid to ${dest}\n` +
+      `     source deposit:      ${deposit}\n` +
+      (payout ? `     destination payout:  ${payout}\n` : "") +
+      `${bar}\n\n`,
+  );
+}
+
 test(
   "real e2e: settles a real payment against the hosted facilitator",
   { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
@@ -189,11 +242,13 @@ test(
     if (process.env.GATEWAY_URL) merchantEnv.GATEWAY_URL = process.env.GATEWAY_URL;
 
     await withMerchant(4089, merchantEnv, async ({ url, output }) => {
-      const result = await runClient({
-        PRIVATE_KEY: privateKey,
-        MERCHANT_URL: url,
-        RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
-      });
+      const result = await withHeartbeat("x402 real settlement", () =>
+        runClient({
+          PRIVATE_KEY: privateKey,
+          MERCHANT_URL: url,
+          RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
+        }),
+      );
 
       const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Access granted/.test(result.output);
       if (paid) {
@@ -202,6 +257,7 @@ test(
         assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
         assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
         assert.match(merchantLog, /source deposit:.*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
+        printSettlementReport("x402", merchantLog);
         return;
       }
 

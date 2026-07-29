@@ -61,6 +61,8 @@ npm run test:e2e
 
 The e2e lives in the two `accept` apps, and each one spawns the **real** `make` client against the hosted facilitator/gateway — so a single funded run exercises **both** sides of a protocol (the payer *and* the merchant). Optional overrides: `FACILITATOR_URL`, `GATEWAY_URL`, `RPC_URL`. Real testnet funds move; see the [settlement proof](docs/settlement-proof.md) for verifying the result on-chain.
 
+Cross-chain settlement can take 30–120s, so the e2e prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it waits, and on success a summary showing the corridor, amount, and the on-chain transaction links — no more silent wait.
+
 To run one app in isolation, `cd` into it and run `npm test` (add `RUN_REAL_E2E=1` for its funded e2e).
 
 ## Evaluating settlement (Base ↔ Tempo)
