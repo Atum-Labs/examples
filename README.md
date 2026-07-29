@@ -45,7 +45,7 @@ Where authorized by Atum, the same examples run against mainnet: set the stub fl
 
 ## Running the tests
 
-Each example is a standalone project with its own tests, but the repo root has a thin orchestration `package.json` (scripts only, no dependencies) that runs them all together. From the repo root:
+Each example is a standalone project with its own tests, but the repo root has a thin orchestration `package.json` (scripts only, no dependencies) that runs them all together. Everything below runs from the repo root; the commands at a glance:
 
 | Command | What it runs | Funds |
 | --- | --- | --- |
@@ -55,33 +55,53 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
 | `npm run typecheck` | `tsc --noEmit` across all four apps | — |
 
-**Smoke (`npm test`)** is hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds — so any private key works. The funded e2e tests auto-skip.
-
-**Funded e2e (`npm run test:e2e`)** settles real payments over the hosted testnet — for both protocols, and in **both directions** of the corridor the examples are wired to, so a funded run proves the corridor settles either way.
-
-> The shipped, hardened corridor is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**, and the commands below use it for concreteness. Atum supports [other corridors](https://docs.atumlabs.xyz/get-started/reference/supported-assets) too — to exercise a different one, repoint each app's `.env` (`SOURCE_*`/`DEST_*` and the source RPCs); see [`settlement-proof.md`](docs/settlement-proof.md).
-
-**Bring your own wallet:** set `PRIVATE_KEY` to a testnet key you control and fund it yourself. A single key is enough — an EOA has the same address on every EVM chain, so one key can pay on both sides of the corridor; just fund it on each chain it spends from.
+### Step 1 - Install
 
 ```bash
-export PRIVATE_KEY=0xYourOwnTestnetKey  # you supply and fund this, on each source chain
-export DEST_ADDRESS=0xYourReceivingEOA  # your receiving address; used on whichever chain is the destination
-npm run test:e2e
+npm run install:all
 ```
 
-For the shipped corridor, that means funding the wallet on Base Sepolia (USDC + gas) and on Tempo (pathUSD, which also covers gas — Tempo has no native gas token; fund it from the Tempo faucet):
+### Step 2 - Smoke test — no funds (start here)
+
+```bash
+npm test
+```
+
+Hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds, so any private key works. It's the fast "is the wiring intact?" check; the funded e2e tests auto-skip.
+
+### Step 3 - Funded settlement — real testnet funds
+
+Settles real payments over the hosted testnet, for both protocols and in **both directions** of the corridor, so one run proves it settles either way.
+
+**1. Bring your own testnet wallet.** The examples never ship or fund a key — you supply one you control. A single EOA is enough: it has the same address on every EVM chain, so one key pays on both sides of the corridor. Fund it on each chain it spends from. For the shipped **Base Sepolia ↔ Tempo** corridor:
+
+- **Base Sepolia** — testnet USDC to spend, plus a little ETH for gas.
+- **Tempo (Moderato)** — pathUSD, which also covers gas (Tempo has no native gas token). Fund it from the faucet:
 
 ```bash
 cast rpc tempo_fundAddress 0xYourWallet --rpc-url https://rpc.moderato.tempo.xyz   # mints 1M pathUSD
 ```
 
-**One-time setup — approve Permit2.** Real settlement pulls your funds through Permit2, so each source token needs a one-time `approve(Permit2)` per chain. `mpp-make-payments` does this for you (`ensureSourceApproval`); `x402-make-payments` does **not** — it preflights the allowance and aborts if it's missing. For the exact `cast` commands (Base Sepolia USDC and Tempo pathUSD), see [`x402-make-payments` → Going to testnet / mainnet](x402-make-payments/README.md#going-to-testnet--mainnet).
+**2. Approve Permit2 (one-time).** Real settlement pulls your funds through Permit2, so each source token needs a one-time `approve(Permit2)` per chain. `mpp-make-payments` does this for you (`ensureSourceApproval`); `x402-make-payments` does **not** — it preflights the allowance and aborts if it's missing. For the exact `cast` commands (Base Sepolia USDC and Tempo pathUSD), see [`x402-make-payments` → Going to testnet / mainnet](x402-make-payments/README.md#going-to-testnet--mainnet).
 
-Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises **both sides** (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (30–120s) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. Real testnet funds move; see the [settlement proof](docs/settlement-proof.md) for verifying on-chain.
+**3. Export your key and receiving address.**
 
-To limit a run to the forward leg only (e.g. a quick check, or a wallet funded on only one chain), set `SKIP_REVERSE=1`. Other overrides: `FACILITATOR_URL`, `GATEWAY_URL`, and the per-direction source RPCs `RPC_URL` / `REVERSE_RPC_URL` (which default to the shipped corridor's chains).
+```bash
+export PRIVATE_KEY=0xYourOwnTestnetKey  # the wallet you funded above
+export DEST_ADDRESS=0xYourReceivingEOA  # your receiving address; used on whichever chain is the destination
+```
 
-To run one app in isolation, `cd` into it and run `npm test` (add `RUN_REAL_E2E=1` for the funded legs; `SKIP_REVERSE=1` to skip the reverse leg).
+**4. Run it.**
+
+```bash
+npm run test:e2e
+```
+
+Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises both sides (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (30–120s) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. See the [settlement proof](docs/settlement-proof.md) to verify the result on-chain.
+
+**Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). Other overrides: `FACILITATOR_URL`, `GATEWAY_URL`, and the per-direction source RPCs `RPC_URL` / `REVERSE_RPC_URL` (default to the shipped corridor's chains). To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs; `SKIP_REVERSE=1` to skip the reverse leg).
+
+> **Other corridors:** Base ↔ Tempo is what these examples are hardened against and wired to out of the box; the commands above use it for concreteness. Atum supports [other corridors](https://docs.atumlabs.xyz/get-started/reference/supported-assets) — to exercise one, repoint each app's `.env` (`SOURCE_*`/`DEST_*` and the source RPCs); see [`settlement-proof.md`](docs/settlement-proof.md).
 
 ## Evaluating settlement
 
