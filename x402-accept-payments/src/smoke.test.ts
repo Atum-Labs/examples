@@ -244,16 +244,26 @@ const REVERSE: Direction = {
 function printSettlementReport(protocol: string, dir: Direction, merchantLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
-  const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1] ?? "(see merchant log)";
+  const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1];
   const payout = merchantLog.match(/destination payout:\s*(\S+)/)?.[1];
+  // x402's /settle often reports only the fulfillment (settlement) tx, not a separate
+  // source-deposit hash — surface whichever legs the facilitator named, as clickable links.
+  const settlementTx = merchantLog.match(/settlement tx:\s*(\S+)/)?.[1];
   const bar = "─".repeat(72);
+  const txLines = [
+    deposit ? `     source deposit:      ${deposit}` : "",
+    payout ? `     destination payout:  ${payout}` : "",
+    !deposit && !payout && settlementTx ? `     settlement tx:       ${settlementTx}` : "",
+    !deposit && !payout && !settlementTx ? `     transactions:        (see merchant log above)` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   process.stdout.write(
     `\n${bar}\n` +
       `  ✅ ${protocol} — SETTLED (${dir.label})\n` +
       `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
       `     expected amount:     ${amount} (atomic) to ${dest}  — confirm on-chain below\n` +
-      `     source deposit:      ${deposit}\n` +
-      (payout ? `     destination payout:  ${payout}\n` : "") +
+      `${txLines}\n` +
       `${bar}\n\n`,
   );
 }
