@@ -84,9 +84,23 @@ This client is exercised end-to-end by the smoke test in [`../x402-accept-paymen
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor — the merchant's default. To pay a real (non-stub) merchant:
 
 1. `PRIVATE_KEY=` — the payer wallet's key.
-2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for gas.
-3. Approve **Permit2** as a spender on the source token once (`approve(Permit2, type(uint160).max)`), so the escrow deposit does not revert at settlement.
-4. Set `RPC_URL=https://sepolia.base.org` so the client preflights that allowance before signing — it aborts with a clear message if the approval is missing, instead of reverting on-chain at settle.
+2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for gas. For the reverse leg, also fund it on **Tempo** with `pathUSD` — that covers both the payment and gas, since Tempo has no native gas token (see the root README's `cast rpc tempo_fundAddress` faucet command).
+3. Approve **Permit2** once per source token, per chain — the escrow pulls your funds through it, and this client refuses to sign without an allowance:
+
+   ```bash
+   # Base Sepolia USDC
+   cast send 0x036CbD53842c5426634e7929541eC2318f3dCF7e "approve(address,uint256)" \
+     0x000000000022D473030F116dDEE9F6B43aC78BA3 1000000000 \
+     --rpc-url https://sepolia.base.org --private-key "$PRIVATE_KEY"
+
+   # Tempo pathUSD — needed to pay *from* Tempo (the reverse leg)
+   cast send 0x20c0000000000000000000000000000000000000 "approve(address,uint256)" \
+     0x000000000022D473030F116dDEE9F6B43aC78BA3 1000000000 \
+     --rpc-url https://rpc.moderato.tempo.xyz --private-key "$PRIVATE_KEY"
+   ```
+
+   `mpp-make-payments` does this for you via `ensureSourceApproval`; this client only checks and aborts.
+4. Set `RPC_URL=https://sepolia.base.org` so the client preflights that allowance before signing — it aborts with a clear message rather than reverting on-chain at settle.
 
 Make sure the paired merchant is running in real mode (`USE_STUB_FACILITATOR=false`, see [`x402-accept-payments`](../x402-accept-payments)).
 

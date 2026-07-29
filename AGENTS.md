@@ -31,6 +31,7 @@ Each app is a standalone npm package (no workspaces). The repo root has a thin o
 - **Never rebuild a signed credential to retry.** Resend the *identical* bytes — settlement is idempotent on identical credentials; a new credential is a second payment. See `mpp-make-payments/src/retry.ts`.
 - **x402 v1 has no async tail.** On slow corridors (notably Base ↔ Tempo), settlement can outrun the facilitator's ~30s synchronous window; `/settle` then returns `"async tail is not supported in v1"`. Treat that as **pending, not failed** — verify on-chain before retrying. Prefer **MPP** on slow corridors (its merchant polls the gateway to a terminal state).
 - **Real settlement is opt-in and moves real testnet funds:** `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP), or `RUN_REAL_E2E=1 PRIVATE_KEY=… DEST_ADDRESS=… npm test`. Startup guards refuse the placeholder MPP secret and an invalid `DEST_ADDRESS` in real mode — keep those guards intact.
+- **Real settlement needs a one-time `approve(Permit2)` per source token/chain** — `x402-make` aborts without it, `mpp-make` auto-approves; see the root README's "One-time setup — approve Permit2."
 - Corridor contract addresses come from the gateway's `GET /defaults` at startup — do not hardcode them.
 
 ## Conventions
