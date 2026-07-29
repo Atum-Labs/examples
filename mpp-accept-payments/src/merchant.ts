@@ -83,7 +83,7 @@ const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541e
 // Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
 const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
 const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "5");
-const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "60");
+const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "120");
 
 const destination = { network: DEST_NETWORK, asset: DEST_ASSET, account: DEST_ACCOUNT };
 const budgets = {

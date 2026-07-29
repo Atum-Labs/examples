@@ -43,9 +43,9 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 
 Both protocols ship an opt-in real-settlement test, gated on `RUN_REAL_E2E=1` so it never runs by accident. Each one boots the real merchant against the hosted gateway/facilitator, drives a real payment with the client, and **asserts a genuine on-chain settlement — failing loudly if it detects the stub**, so it cannot give a false pass.
 
-### MPP (recommended for slower corridors)
+### MPP (recommended)
 
-MPP is the safer choice when settlement is slow: cross-chain settlement can take longer than x402 v1 can confirm synchronously (as on the shipped Base ↔ Tempo corridor), and the MPP merchant polls the gateway to a terminal state instead of giving up (see [Reliability](#reliability-characteristics)).
+On the shipped Base ↔ Tempo corridor MPP settles about as fast as x402 (~25–40s per leg). Its edge isn't speed — it's that the merchant polls the gateway to a terminal state, so if a corridor ever settles slower than x402 v1 can confirm synchronously, MPP still resolves to a confirmed result instead of giving up (see [Reliability](#reliability-characteristics)).
 
 ```bash
 # one-time: install the restricted client + merchant packages
@@ -120,7 +120,7 @@ If both transactions confirm on their respective chains, the corridor settled �
 | Behavior when settlement is slow (e.g. the shipped Base ↔ Tempo corridor) | Returns `"async tail is not supported in v1"`; the payment keeps settling but **cannot be confirmed synchronously**. Not a confirmed failure. | Waits it out and reports the terminal result. |
 | Idempotency / retry | Resending the **identical** signed credential is idempotent (the gateway returns the original result, not a second charge). Never build a new credential for a retry. | Same — see `mpp-make-payments/src/retry.ts` and its tests. |
 
-**Takeaway:** on slower corridors (such as the shipped Base ↔ Tempo), prefer **MPP** for a deterministic confirmation. If you use x402, your integration must treat a pending/async-tail result as *unconfirmed, not failed*, and reconcile against on-chain state before retrying.
+**Takeaway:** on the shipped Base ↔ Tempo corridor both protocols settle at comparable speed (~25–40s per leg); MPP additionally **survives the async tail** — it polls to a terminal state, so it always resolves to a confirmed result. Prefer **MPP** for a deterministic confirmation. If you use x402, your integration must treat a pending/async-tail result as *unconfirmed, not failed*, and reconcile against on-chain state before retrying.
 
 ## Beyond settlement: what you still build
 

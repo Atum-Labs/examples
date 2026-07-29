@@ -64,7 +64,7 @@ const DEST_ADDRESS = ADDRESS_RE.test(RAW_DEST_ADDRESS)
 // Auction window for settlers to quote. 5s matches the SDK's DEFAULT_QUOTE_DEADLINE_SECONDS
 // (and the MPP example); must be strictly less than FULFILLMENT_DEADLINE_SECONDS.
 const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 5);
-const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 300);
+const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 120);
 
 // ---------------------------------------------------------------------------
 // x402 v2 header names. Each value is base64(JSON) — standard base64, no prefix.
