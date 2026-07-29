@@ -49,22 +49,31 @@ interface RunResult {
 function waitForStdout(
   child: ChildProcessWithoutNullStreams,
   match: string,
+  getOutput: () => string,
   timeoutMs = 15_000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Accumulate before matching: a split write can land "Merchant" and
+    // "listening" in separate chunks, which a per-chunk check would miss.
+    let buf = "";
+    // Surface what the merchant actually printed — a bad GATEWAY_URL, a busy
+    // port, or an invalid amount all exit early, and the reason is in its output.
+    const fail = (why: string) =>
+      reject(new Error(`${why}\n--- merchant output ---\n${getOutput()}`));
     const timer = setTimeout(
-      () => reject(new Error(`timed out waiting for merchant output to include "${match}"`)),
+      () => fail(`timed out waiting for merchant output to include "${match}"`),
       timeoutMs,
     );
     child.stdout.on("data", (chunk: Buffer) => {
-      if (chunk.toString().includes(match)) {
+      buf += chunk.toString();
+      if (buf.includes(match)) {
         clearTimeout(timer);
         resolve();
       }
     });
     child.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`merchant exited early (code ${code}) before printing "${match}"`));
+      fail(`merchant exited early (code ${code}) before printing "${match}"`);
     });
   });
 }
@@ -102,7 +111,7 @@ async function withMerchant(
   merchant.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
 
   try {
-    await waitForStdout(merchant, "Merchant listening");
+    await waitForStdout(merchant, "Merchant listening", () => output);
     await fn({ url: `http://localhost:${port}/paid`, output: () => output });
   } finally {
     merchant.kill();
