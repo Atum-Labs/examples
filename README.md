@@ -61,11 +61,16 @@ Each example is a standalone project with its own tests, but the repo root has a
 
 > The shipped, hardened corridor is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**, and the commands below use it for concreteness. Atum supports [other corridors](https://docs.atumlabs.xyz/get-started/reference/supported-assets) too — to exercise a different one, repoint each app's `.env` (`SOURCE_*`/`DEST_*` and the source RPCs); see [`settlement-proof.md`](docs/settlement-proof.md).
 
-**Bring your own wallet:** set `PRIVATE_KEY` to a testnet key you control and fund it yourself. A single key is enough — an EOA has the same address on every EVM chain, so one key can pay on both sides of the corridor; just fund it on each chain it spends from.
+For the shipped corridor, that means funding the wallet on **both** chains:
+
+- **Base Sepolia** — testnet USDC from [Circle's faucet](https://faucet.circle.com), plus a little ETH for gas from any Base Sepolia faucet.
+- **Tempo (Moderato)** — pathUSD, which also covers gas (Tempo has no native gas token):
 
 ```bash
-export PRIVATE_KEY=0xYourOwnTestnetKey  # you supply and fund this, on each source chain
-export DEST_ADDRESS=0xYourReceivingEOA  # your receiving address; used on whichever chain is the destination
+cast rpc tempo_fundAddress 0xYourWallet --rpc-url https://rpc.moderato.tempo.xyz   # mints 1M pathUSD
+```
+
+Only spending one direction? `SKIP_REVERSE=1` limits the run to the forward leg, so you only need Base funded.
 npm run test:e2e
 ```
 
