@@ -34,7 +34,7 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 
 - Node.js 20+ and npm.
 - **`@atumlabs` npm access** (early access / restricted scope). Without it, `npm install` fails on the client packages. [Contact Atum](mailto:support@atumlabs.xyz).
-- A **funded wallet on the source chain** — for the shipped corridor, Base Sepolia (testnet USDC to spend plus gas). This is the payer key.
+- A **funded wallet on every chain it spends from** — for the shipped corridor that's Base Sepolia (testnet USDC to spend, plus ETH for gas) and, because the funded test settles **both directions** by default, Tempo (Moderato) as well (pathUSD, which also covers gas: `cast rpc tempo_fundAddress <your-address> --rpc-url https://rpc.moderato.tempo.xyz`). Set `SKIP_REVERSE=1` to run the forward leg only and fund just one chain.
 - A **receiving address on the destination chain** — for the shipped corridor, Tempo (Moderato), where the merchant is paid out.
 
 > Real testnet funds move. A failed or timed-out result on `production-testnet` is not necessarily a confirmed failure — verify on-chain before retrying (a fresh retry with a *new* credential is a second payment).
