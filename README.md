@@ -75,7 +75,7 @@ Settles real payments over the hosted testnet, for both protocols and in **both 
 
 **1. Bring your own testnet wallet.** The examples never ship or fund a key — you supply one you control. A single EOA is enough: it has the same address on every EVM chain, so one key pays on both sides of the corridor. Fund it on each chain it spends from. For the shipped **Base Sepolia ↔ Tempo** corridor:
 
-- **Base Sepolia** — testnet USDC to spend, plus a little ETH for gas.
+- **Base Sepolia** — testnet USDC from [Circle's faucet](https://faucet.circle.com) to spend, plus a little ETH for gas from any Base Sepolia faucet.
 - **Tempo (Moderato)** — pathUSD, which also covers gas (Tempo has no native gas token). Fund it from the faucet:
 
 ```bash
