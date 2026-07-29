@@ -318,17 +318,21 @@ function txLink(chainId: string | undefined, hash: string | undefined): string {
   return base ? `${base}${hash}` : `${hash}${chainId ? ` (${chainId})` : ""}`;
 }
 
-// The settle response always carries the settlement tx (the source-chain escrow
-// deposit); the gateway's fulfillmentConfirmation, when present, also carries the
-// destination-chain payout. Print whichever we have.
+// x402's /settle reports the *fulfillment* transaction (verified on-chain: a call to the
+// destination chain's fulfillmentProxy), NOT the source escrow deposit. Only label a leg when
+// the confirmation names it explicitly — otherwise print the tx without guessing the chain.
 function logSettlement(settled: SettleResponse): void {
   const c = settled.fulfillmentConfirmation ?? {};
-  const sourceChain = (c.source_chain_id as string | undefined) ?? settled.network;
-  const sourceHash = (c.source_tx_hash as string | undefined) ?? settled.transaction;
+  const sourceChain = c.source_chain_id as string | undefined;
+  const sourceHash = c.source_tx_hash as string | undefined;
   const destChain = c.destination_chain_id as string | undefined;
   const destHash = c.destination_tx_hash as string | undefined;
-  console.log(`    source deposit:     ${txLink(sourceChain, sourceHash)}`);
+  if (sourceHash) console.log(`    source deposit:     ${txLink(sourceChain, sourceHash)}`);
   if (destHash) console.log(`    destination payout: ${txLink(destChain, destHash)}`);
+  if (!sourceHash && !destHash) {
+    console.log(`    settlement tx:      ${txLink(settled.network, settled.transaction)}`);
+    console.log(`    (facilitator reported one leg only — verify the other on-chain)`);
+  }
 }
 
 // ---------------------------------------------------------------------------
