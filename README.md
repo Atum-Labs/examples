@@ -55,7 +55,9 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm test` | Smoke tests for all four apps (alias for `test:smoke`) | None |
 | `npm run test:e2e` | Real, funded settlement for both protocols, **both directions** of the shipped corridor | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
-| `npm run typecheck` | `tsc --noEmit` across all four apps | — |
+**Bring your own wallet:** set `PRIVATE_KEY` to a testnet key you control and fund it yourself. A single key is enough — an EOA has the same address on every EVM chain, so one key can pay on both sides of the corridor; just fund it on each chain it spends from.
+
+**One-time setup:** the escrow pulls funds through Permit2, so each source token needs `approve(Permit2)` once per chain. `mpp-make-payments` does this automatically; `x402-make-payments` does not — see [its README](x402-make-payments/README.md#going-to-testnet--mainnet) for the exact commands on Base Sepolia and Tempo.
 
 ### Step 1 - Install
 
