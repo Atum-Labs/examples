@@ -100,7 +100,7 @@ RUN_REAL_E2E=1 \
   npm test
 ```
 
-On a synchronous settlement the merchant logs `→ 200: settled (tx 0x…)`. If the corridor settles slower than the facilitator's synchronous window, the test **fails by design** with the async-tail explanation; set `ALLOW_ASYNC_TAIL=1` to accept "submitted, settling asynchronously" as a conditional pass (wiring verified up to submission). Optional overrides: `RPC_URL` (default `https://sepolia.base.org`), `FACILITATOR_URL`, `GATEWAY_URL`.
+On a synchronous settlement the merchant logs `→ 200: settled`, followed by the settlement transaction link(s). If the corridor settles slower than the facilitator's synchronous window, the test **fails by design** with the async-tail explanation; set `ALLOW_ASYNC_TAIL=1` to accept "submitted, settling asynchronously" as a conditional pass (wiring verified up to submission). Optional overrides: `RPC_URL` (default `https://sepolia.base.org`), `FACILITATOR_URL`, `GATEWAY_URL`.
 
 ## Independent verification
 
