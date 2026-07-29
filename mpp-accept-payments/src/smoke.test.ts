@@ -253,12 +253,41 @@ function endpointLabel(network: string, asset: string): string {
   return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
 }
 
+// A settlement direction. The shipped corridor is bidirectional (Base ↔ Tempo): the
+// forward leg is what most integrators run first; the reverse leg proves the ↔.
+interface Direction {
+  label: string;
+  sourceNetwork: string;
+  sourceAsset: string;
+  destNetwork: string;
+  destAsset: string;
+  rpcUrl?: string; // source-chain RPC for the client's Permit2 preflight (optional)
+}
+
+const FORWARD: Direction = {
+  label: "Base Sepolia → Tempo (Moderato)",
+  sourceNetwork: "eip155:84532",
+  sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  destNetwork: "eip155:42431",
+  destAsset: "0x20c0000000000000000000000000000000000000",
+  rpcUrl: process.env.RPC_URL ?? "https://sepolia.base.org",
+};
+
+// Reverse pays FROM Tempo, so the payer must be funded on Tempo (pathUSD — which also
+// covers gas, since Tempo has no native gas token). The source-chain RPC for the Permit2
+// approval defaults to the public Moderato endpoint; override with REVERSE_RPC_URL.
+// Runs by default in a funded run; set SKIP_REVERSE=1 to skip it.
+const REVERSE: Direction = {
+  label: "Tempo (Moderato) → Base Sepolia",
+  sourceNetwork: "eip155:42431",
+  sourceAsset: "0x20c0000000000000000000000000000000000000",
+  destNetwork: "eip155:84532",
+  destAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  rpcUrl: process.env.REVERSE_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
+};
+
 // Final "what settled where" summary, pulled from the merchant's own settlement log.
-function printSettlementReport(protocol: string, merchantLog: string): void {
-  const srcNet = process.env.SOURCE_NETWORK ?? "eip155:84532";
-  const srcAsset = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-  const dstNet = process.env.DEST_NETWORK ?? "eip155:42431";
-  const dstAsset = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000";
+function printSettlementReport(protocol: string, dir: Direction, merchantLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
   const paymentId = merchantLog.match(/settled payment (\S+)/)?.[1];
@@ -267,9 +296,9 @@ function printSettlementReport(protocol: string, merchantLog: string): void {
   const bar = "─".repeat(72);
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED\n` +
+      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED (${dir.label})\n` +
       (paymentId ? `     payment id:          ${paymentId}\n` : "") +
-      `     corridor:            ${endpointLabel(srcNet, srcAsset)}  →  ${endpointLabel(dstNet, dstAsset)}\n` +
+      `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
       `     amount:              ${amount} (atomic) paid to ${dest}\n` +
       `     source deposit:      ${deposit}\n` +
       (payout ? `     destination payout:  ${payout}\n` : "") +
@@ -277,43 +306,62 @@ function printSettlementReport(protocol: string, merchantLog: string): void {
   );
 }
 
+async function runRealSettlement(dir: Direction, port: number): Promise<void> {
+  const privateKey = process.env.PRIVATE_KEY as string;
+  const merchantEnv: Record<string, string> = {
+    USE_STUB_SUBMITTER: "false",
+    DEST_ADDRESS: process.env.DEST_ADDRESS ?? "",
+    SOURCE_NETWORK: dir.sourceNetwork,
+    SOURCE_ASSET: dir.sourceAsset,
+    DEST_NETWORK: dir.destNetwork,
+    DEST_ASSET: dir.destAsset,
+    // A real, private secret so the placeholder-secret guard passes.
+    MPP_SECRET_KEY: process.env.MPP_SECRET_KEY ?? randomBytes(32).toString("hex"),
+  };
+  if (process.env.GATEWAY_URL) merchantEnv.GATEWAY_URL = process.env.GATEWAY_URL;
+  if (process.env.FULFILLMENT_DEADLINE_SECONDS)
+    merchantEnv.FULFILLMENT_DEADLINE_SECONDS = process.env.FULFILLMENT_DEADLINE_SECONDS;
+
+  await withMerchant(port, merchantEnv, async ({ url, output }) => {
+    // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
+    // the other direction can't leak in and point the preflight at the wrong chain.
+    const result = await withHeartbeat(`MPP real settlement (${dir.label})`, () =>
+      runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
+    );
+
+    assertPaid(result, "real client");
+
+    // Real settlement confirmed — make sure it wasn't the stub. The stub logs a
+    // "pay_stub_…" payment id; a real settlement logs a hex payment id plus the
+    // source-deposit and destination-payout transaction links.
+    const merchantLog = output();
+    assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
+    assert.match(
+      merchantLog,
+      /settled payment 0x[0-9a-f]/i,
+      `expected a real on-chain settlement in the merchant log:\n${merchantLog}`,
+    );
+    printSettlementReport("MPP", dir, merchantLog);
+  });
+}
+
+// The corridor is bidirectional, so a funded run settles BOTH ways by default. The
+// reverse leg spends on Tempo (pathUSD, which also covers gas), so the payer must be
+// funded there too; set SKIP_REVERSE=1 to limit a run to the forward (Base → Tempo) leg.
+const reverseSkip = !REAL_E2E_ENABLED
+  ? "set RUN_REAL_E2E=1 and PRIVATE_KEY to run"
+  : process.env.SKIP_REVERSE === "1"
+    ? "reverse leg disabled (SKIP_REVERSE=1)"
+    : false;
+
 test(
-  "real e2e: settles a real Base -> Tempo payment through the gateway",
+  "real e2e: settles a real Base → Tempo payment through the gateway",
   { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
-  async () => {
-    const privateKey = process.env.PRIVATE_KEY as string;
-    const merchantEnv: Record<string, string> = {
-      USE_STUB_SUBMITTER: "false",
-      DEST_ADDRESS: process.env.DEST_ADDRESS ?? "",
-      // A real, private secret so the placeholder-secret guard passes.
-      MPP_SECRET_KEY: process.env.MPP_SECRET_KEY ?? randomBytes(32).toString("hex"),
-    };
-    if (process.env.GATEWAY_URL) merchantEnv.GATEWAY_URL = process.env.GATEWAY_URL;
-    if (process.env.FULFILLMENT_DEADLINE_SECONDS)
-      merchantEnv.FULFILLMENT_DEADLINE_SECONDS = process.env.FULFILLMENT_DEADLINE_SECONDS;
+  () => runRealSettlement(FORWARD, 4099),
+);
 
-    await withMerchant(4099, merchantEnv, async ({ url, output }) => {
-      const result = await withHeartbeat("MPP real settlement", () =>
-        runClient({
-          PRIVATE_KEY: privateKey,
-          MERCHANT_URL: url,
-          RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
-        }),
-      );
-
-      assertPaid(result, "real client");
-
-      // Real settlement confirmed — make sure it wasn't the stub. The stub logs a
-      // "pay_stub_…" payment id; a real settlement logs a hex payment id plus the
-      // source-deposit and destination-payout transaction links.
-      const merchantLog = output();
-      assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
-      assert.match(
-        merchantLog,
-        /settled payment 0x[0-9a-f]/i,
-        `expected a real on-chain settlement in the merchant log:\n${merchantLog}`,
-      );
-      printSettlementReport("MPP", merchantLog);
-    });
-  },
+test(
+  "real e2e (reverse): settles a real Tempo → Base payment through the gateway",
+  { skip: reverseSkip },
+  () => runRealSettlement(REVERSE, 4100),
 );

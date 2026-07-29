@@ -207,12 +207,41 @@ function endpointLabel(network: string, asset: string): string {
   return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
 }
 
+// A settlement direction. The shipped corridor is bidirectional (Base ↔ Tempo): the
+// forward leg is what most integrators run first; the reverse leg proves the ↔.
+interface Direction {
+  label: string;
+  sourceNetwork: string;
+  sourceAsset: string;
+  destNetwork: string;
+  destAsset: string;
+  rpcUrl?: string; // source-chain RPC for the client's Permit2 preflight (optional)
+}
+
+const FORWARD: Direction = {
+  label: "Base Sepolia → Tempo (Moderato)",
+  sourceNetwork: "eip155:84532",
+  sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  destNetwork: "eip155:42431",
+  destAsset: "0x20c0000000000000000000000000000000000000",
+  rpcUrl: process.env.RPC_URL ?? "https://sepolia.base.org",
+};
+
+// Reverse pays FROM Tempo, so the payer must be funded on Tempo (pathUSD — which also
+// covers gas, since Tempo has no native gas token). The source-chain RPC for the Permit2
+// preflight defaults to the public Moderato endpoint; override with REVERSE_RPC_URL.
+// Runs by default in a funded run; set SKIP_REVERSE=1 to skip it.
+const REVERSE: Direction = {
+  label: "Tempo (Moderato) → Base Sepolia",
+  sourceNetwork: "eip155:42431",
+  sourceAsset: "0x20c0000000000000000000000000000000000000",
+  destNetwork: "eip155:84532",
+  destAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  rpcUrl: process.env.REVERSE_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
+};
+
 // Final "what settled where" summary, pulled from the merchant's own settlement log.
-function printSettlementReport(protocol: string, merchantLog: string): void {
-  const srcNet = process.env.SOURCE_NETWORK ?? "eip155:84532";
-  const srcAsset = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-  const dstNet = process.env.DEST_NETWORK ?? "eip155:42431";
-  const dstAsset = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000";
+function printSettlementReport(protocol: string, dir: Direction, merchantLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
   const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1] ?? "(see merchant log)";
@@ -220,8 +249,8 @@ function printSettlementReport(protocol: string, merchantLog: string): void {
   const bar = "─".repeat(72);
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED\n` +
-      `     corridor:            ${endpointLabel(srcNet, srcAsset)}  →  ${endpointLabel(dstNet, dstAsset)}\n` +
+      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED (${dir.label})\n` +
+      `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
       `     amount:              ${amount} (atomic) paid to ${dest}\n` +
       `     source deposit:      ${deposit}\n` +
       (payout ? `     destination payout:  ${payout}\n` : "") +
@@ -229,65 +258,84 @@ function printSettlementReport(protocol: string, merchantLog: string): void {
   );
 }
 
-test(
-  "real e2e: settles a real payment against the hosted facilitator",
-  { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
-  async () => {
-    const privateKey = process.env.PRIVATE_KEY as string;
-    const merchantEnv: Record<string, string> = {
-      USE_STUB_FACILITATOR: "false",
-      DEST_ADDRESS: process.env.DEST_ADDRESS ?? "",
-    };
-    if (process.env.FACILITATOR_URL) merchantEnv.FACILITATOR_URL = process.env.FACILITATOR_URL;
-    if (process.env.GATEWAY_URL) merchantEnv.GATEWAY_URL = process.env.GATEWAY_URL;
+async function runRealSettlement(dir: Direction, port: number): Promise<void> {
+  const privateKey = process.env.PRIVATE_KEY as string;
+  const merchantEnv: Record<string, string> = {
+    USE_STUB_FACILITATOR: "false",
+    DEST_ADDRESS: process.env.DEST_ADDRESS ?? "",
+    SOURCE_NETWORK: dir.sourceNetwork,
+    SOURCE_ASSET: dir.sourceAsset,
+    DEST_NETWORK: dir.destNetwork,
+    DEST_ASSET: dir.destAsset,
+  };
+  if (process.env.FACILITATOR_URL) merchantEnv.FACILITATOR_URL = process.env.FACILITATOR_URL;
+  if (process.env.GATEWAY_URL) merchantEnv.GATEWAY_URL = process.env.GATEWAY_URL;
 
-    await withMerchant(4089, merchantEnv, async ({ url, output }) => {
-      const result = await withHeartbeat("x402 real settlement", () =>
-        runClient({
-          PRIVATE_KEY: privateKey,
-          MERCHANT_URL: url,
-          RPC_URL: process.env.RPC_URL ?? "https://sepolia.base.org",
-        }),
+  await withMerchant(port, merchantEnv, async ({ url, output }) => {
+    // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
+    // the other direction can't leak in and point the preflight at the wrong chain.
+    const result = await withHeartbeat(`x402 real settlement (${dir.label})`, () =>
+      runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
+    );
+
+    const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Access granted/.test(result.output);
+    if (paid) {
+      // Real settlement confirmed — make sure it wasn't the stub.
+      const merchantLog = output();
+      assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
+      assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
+      assert.match(merchantLog, /source deposit:.*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
+      printSettlementReport("x402", dir, merchantLog);
+      return;
+    }
+
+    // Known x402 v1 limitation: when settlement outruns the gateway's synchronous
+    // window (~30s, server-side payment_sync_wait_seconds), the facilitator returns
+    // "async tail is not supported in v1". The payment was submitted; x402 v1 just
+    // can't confirm it synchronously — MPP handles this by polling the gateway, which
+    // x402's hosted facilitator does not expose. Set ALLOW_ASYNC_TAIL=1 to treat a
+    // clean submission-up-to-settlement as a conditional pass (wiring verified).
+    const asyncTail = /async tail is not supported|did not complete synchronously/.test(result.output);
+    if (asyncTail && process.env.ALLOW_ASYNC_TAIL === "1") {
+      console.warn(
+        "real e2e: submission accepted, but settlement exceeded the facilitator's synchronous " +
+          "window (x402 v1 async tail unsupported). Wiring verified up to submission; settlement " +
+          "is completing asynchronously and cannot be confirmed synchronously here.",
       );
+      return;
+    }
+    if (asyncTail) {
+      assert.fail(
+        "x402 settlement did not complete within the facilitator's synchronous window (~30s, the " +
+          "gateway's payment_sync_wait_seconds). x402 v1 has no async tail, so this corridor's " +
+          "settlement is too slow for synchronous confirmation. Options: raise the gateway's " +
+          "payment_sync_wait_seconds, use a faster corridor, or set ALLOW_ASYNC_TAIL=1 to accept " +
+          `submission-only verification.\n\nClient output:\n${result.output}`,
+      );
+    }
 
-      const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Access granted/.test(result.output);
-      if (paid) {
-        // Real settlement confirmed — make sure it wasn't the stub.
-        const merchantLog = output();
-        assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
-        assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
-        assert.match(merchantLog, /source deposit:.*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
-        printSettlementReport("x402", merchantLog);
-        return;
-      }
+    // Anything else is a genuine failure — surface it in full.
+    assertPaid(result, "real client");
+  });
+}
 
-      // Known x402 v1 limitation: when settlement outruns the gateway's synchronous
-      // window (~30s, server-side payment_sync_wait_seconds), the facilitator returns
-      // "async tail is not supported in v1". The payment was submitted; x402 v1 just
-      // can't confirm it synchronously — MPP handles this by polling the gateway, which
-      // x402's hosted facilitator does not expose. Set ALLOW_ASYNC_TAIL=1 to treat a
-      // clean submission-up-to-settlement as a conditional pass (wiring verified).
-      const asyncTail = /async tail is not supported|did not complete synchronously/.test(result.output);
-      if (asyncTail && process.env.ALLOW_ASYNC_TAIL === "1") {
-        console.warn(
-          "real e2e: submission accepted, but settlement exceeded the facilitator's synchronous " +
-            "window (x402 v1 async tail unsupported). Wiring verified up to submission; settlement " +
-            "is completing asynchronously and cannot be confirmed synchronously here.",
-        );
-        return;
-      }
-      if (asyncTail) {
-        assert.fail(
-          "x402 settlement did not complete within the facilitator's synchronous window (~30s, the " +
-            "gateway's payment_sync_wait_seconds). x402 v1 has no async tail, so this corridor's " +
-            "settlement is too slow for synchronous confirmation. Options: raise the gateway's " +
-            "payment_sync_wait_seconds, use a faster corridor, or set ALLOW_ASYNC_TAIL=1 to accept " +
-            `submission-only verification.\n\nClient output:\n${result.output}`,
-        );
-      }
+// The corridor is bidirectional, so a funded run settles BOTH ways by default. The
+// reverse leg spends on Tempo (pathUSD, which also covers gas), so the payer must be
+// funded there too; set SKIP_REVERSE=1 to limit a run to the forward (Base → Tempo) leg.
+const reverseSkip = !REAL_E2E_ENABLED
+  ? "set RUN_REAL_E2E=1 and PRIVATE_KEY to run"
+  : process.env.SKIP_REVERSE === "1"
+    ? "reverse leg disabled (SKIP_REVERSE=1)"
+    : false;
 
-      // Anything else is a genuine failure — surface it in full.
-      assertPaid(result, "real client");
-    });
-  },
+test(
+  "real e2e: settles a real Base → Tempo payment against the hosted facilitator",
+  { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
+  () => runRealSettlement(FORWARD, 4089),
+);
+
+test(
+  "real e2e (reverse): settles a real Tempo → Base payment against the hosted facilitator",
+  { skip: reverseSkip },
+  () => runRealSettlement(REVERSE, 4090),
 );
