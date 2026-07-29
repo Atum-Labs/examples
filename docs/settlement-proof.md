@@ -1,6 +1,6 @@
 # Settlement proof: verifying real settlement over x402 and MPP
 
-This guide shows how to take these examples to **real settlement**, and how to **verify (with independent on-chain evidence) that a payment actually settled**. It's for anyone moving an integration toward production, whether you're the merchant accepting payments, the payer making them, or building a platform on top of the rail.
+This guide shows how to apply these examples to **real settlement**, and how to **verify (with independent on-chain evidence) that a payment actually settled**. It's for anyone moving an integration toward production, whether you're the merchant accepting payments, the payer making them, or building a platform on top of the rail.
 
 The question it answers is: **is settlement over these protocols real, verifiable?** You can confirm that, end to end, with on-chain evidence — no Atum-side demo required.
 
@@ -122,9 +122,9 @@ If both transactions confirm on their respective chains, the corridor settled �
 
 **Takeaway:** on slower corridors (such as the shipped Base ↔ Tempo), prefer **MPP** for a deterministic confirmation. If you use x402, your integration must treat a pending/async-tail result as *unconfirmed, not failed*, and reconcile against on-chain state before retrying.
 
-## What stays your responsibility
+## Beyond settlement: what you still build
 
-The rail settles value and gives you on-chain finality. Everything around that stays with you and is intentionally out of scope for these examples — scope it in from the start rather than discovering it late. (These matter most if you're building a platform or intermediary on top of the rail, but every integrator owns some of them.)
+The rail settles value and gives you on-chain finality. Everything around that stays with you and is intentionally out of scope for these examples. These matter if you're building an intermediary on top of the rail.
 
 - **Fiat bridging** — card auth/capture and on-/off-ramp between fiat and the source/destination stablecoins.
 - **Credentials & identity** — issuing and validating the credentials (agent or otherwise) that authorize a payment; tokenization.
@@ -132,7 +132,7 @@ The rail settles value and gives you on-chain finality. Everything around that s
 - **Guarantee / underwriting & risk** — fraud, limits, and any settlement guarantee you extend to your users.
 - **Reconciliation & reporting** — mapping on-chain settlement evidence back to your ledger.
 
-Knowing where the rail ends and your system begins is the difference between "settlement is real and I know exactly what I still own" and assuming the examples cover more than they do.
+These are illustrative. Other participants in the rail may carry related responsibilities.
 
 ## Further reading
 
