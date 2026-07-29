@@ -2,6 +2,10 @@
 
 An example x402 client that programmatically pays for an HTTP-gated resource using the [x402](https://x402.org) protocol and Atum's `atum-escrow` scheme.
 
+> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, facilitator, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+
+## How it works
+
 The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` response.
@@ -9,7 +13,11 @@ The client handles the full payment flow automatically:
 3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
 4. Retries the request with the signed credential in a `PAYMENT-SIGNATURE` header and returns the final `200` response.
 
-> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, facilitator, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+## Resilience: safe retries
+
+x402's SDK handles the payment handshake for you: `wrapFetchWithPayment` (from `@x402/fetch`) makes the initial request, reads the `402`, signs the payment, and retries with the credential — all in one `fetchWithPayment` call. This example therefore doesn't ship a dedicated retry module the way [`mpp-make-payments`](../mpp-make-payments) does.
+
+If you add your own retries around a settled payment (e.g. on a transient `5xx`), follow the same rule that example documents: resend the **identical** signed payment rather than signing a new one — re-signing would be a distinct, second payment, and the Atum gateway is idempotent on an identical resubmission.
 
 ## Pair with x402-accept-payments
 
@@ -69,7 +77,7 @@ Status: 200
 
 This client is exercised end-to-end by the smoke test in [`../x402-accept-payments`](../x402-accept-payments), which boots both apps together and drives real payments through them. Run `npm test` there (after `npm install` in both apps) — see that example's README for details.
 
-## Going to testnet or mainnet
+## Going to testnet / mainnet
 
 > **⚠ Cross-chain settlement can be slower than x402 can confirm.** x402 settles **synchronously**: if cross-chain settlement outruns the facilitator's ~30s window (common on slow corridors like **Base ↔ Tempo**), the client prints a `402` with `"the async tail is not supported in v1"` and a "settlement pending" warning. That is **not** a confirmed failure — the payment was submitted and may still complete. Verify on-chain before retrying (a fresh retry is a *second* payment). Prefer fast corridors for a synchronous demo.
 

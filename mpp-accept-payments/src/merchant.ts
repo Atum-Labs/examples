@@ -31,7 +31,7 @@ const REALM = process.env.REALM ?? "mpp.example.com";
 const SECRET_KEY = process.env.MPP_SECRET_KEY ?? DEFAULT_SECRET_KEY;
 
 // Exact amount the merchant receives on the destination chain (atomic units).
-const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "100000"; // 0.10 (6-decimal token)
+const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "50000"; // 0.05 (6-decimal token)
 
 // The stub submitter runs the full flow locally with no gateway and no funds. Set
 // USE_STUB_SUBMITTER=false to settle through a real Atum Payment Gateway instead.
@@ -54,11 +54,32 @@ if (!USE_STUB_SUBMITTER && SECRET_KEY === DEFAULT_SECRET_KEY) {
 // The corridor's contract addresses (escrow, reserver, releaser, fulfillment proxy,
 // verifier) are NOT configured here: against a real gateway they're fetched from
 // `/defaults` by `corridorFromDefaults`; the offline stub uses built-in placeholders.
-const DEST_NETWORK = process.env.DEST_NETWORK ?? "eip155:11142220"; // Celo Sepolia
-const DEST_ASSET = process.env.DEST_ASSET ?? "0x0000000000000000000000000000000000000002";
-const DEST_ACCOUNT = process.env.DEST_ADDRESS ?? "0x0000000000000000000000000000000000000003";
-const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:421614"; // Arbitrum Sepolia
-const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x0000000000000000000000000000000000000001";
+const DEST_NETWORK = process.env.DEST_NETWORK ?? "eip155:42431"; // Tempo Moderato
+const DEST_ASSET = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000"; // Tempo pathUSD
+// Where the merchant gets paid on the destination chain. Use DEST_ADDRESS when it's a
+// valid address; otherwise fall back to a throwaway so the stub demo runs with no .env
+// edits. That fallback is safe only for the stub (nothing actually settles) — the guard
+// below rejects it in real mode, so real funds can never be paid to a dead address.
+const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const RAW_DEST_ADDRESS = process.env.DEST_ADDRESS ?? "";
+const DEST_ACCOUNT = ADDRESS_RE.test(RAW_DEST_ADDRESS)
+  ? RAW_DEST_ADDRESS
+  : "0x000000000000000000000000000000000000dEaD";
+
+// Real settlement pays out to DEST_ACCOUNT. The .env.example placeholder is not a real
+// address, and the code fallback above is a throwaway — so refuse to start real
+// settlement until DEST_ADDRESS is set to a valid address. Otherwise a config slip would
+// settle real funds to an address nobody controls (mirrors x402-accept).
+if (!USE_STUB_SUBMITTER && !ADDRESS_RE.test(RAW_DEST_ADDRESS)) {
+  console.error(
+    "Refusing to start: USE_STUB_SUBMITTER=false enables real settlement, but DEST_ADDRESS " +
+      "is not a valid address. Set DEST_ADDRESS in .env to your receiving address on the " +
+      "destination chain before accepting real payments.",
+  );
+  process.exit(1);
+}
+const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:84532"; // Base Sepolia
+const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e"; // Base Sepolia USDC
 // Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
 const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
 const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "60");

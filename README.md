@@ -37,6 +37,32 @@ The default corridor is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real
 
 Where authorized by Atum, the same examples run against mainnet: set the stub flag to `false`, point the gateway and facilitator URLs at the production endpoints Atum provides, and set the corridor to Atum-authorized mainnet chains and tokens. Contact Atum for production access and URLs.
 
+## Running the tests
+
+Each example is a standalone project with its own tests, but the repo root has a thin orchestration `package.json` (scripts only, no dependencies) that runs them all together. From the repo root:
+
+| Command | What it runs | Funds |
+| --- | --- | --- |
+| `npm run install:all` | `npm install` in all four apps | — |
+| `npm test` | Smoke tests for all four apps (alias for `test:smoke`) | None |
+| `npm run test:e2e` | Real, funded settlement for both protocols | Real testnet funds |
+| `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
+| `npm run typecheck` | `tsc --noEmit` across all four apps | — |
+
+**Smoke (`npm test`)** is hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds — so any private key works. The funded e2e tests auto-skip.
+
+**Funded e2e (`npm run test:e2e`)** settles a real payment over the hosted testnet for both protocols. It needs a funded payer key exported in your shell:
+
+```bash
+export PRIVATE_KEY=0xYourFundedTestnetKey
+export DEST_ADDRESS=0xYourReceivingAddressOnTempo   # required by the merchant's real-mode guard
+npm run test:e2e
+```
+
+The e2e lives in the two `accept` apps, and each one spawns the **real** `make` client against the hosted facilitator/gateway — so a single funded run exercises **both** sides of a protocol (the payer *and* the merchant). Optional overrides: `FACILITATOR_URL`, `GATEWAY_URL`, `RPC_URL`. Real testnet funds move; see the [settlement proof](docs/settlement-proof.md) for verifying the result on-chain.
+
+To run one app in isolation, `cd` into it and run `npm test` (add `RUN_REAL_E2E=1` for its funded e2e).
+
 ## Evaluating settlement (Base ↔ Tempo)
 
 Assessing whether Atum's Base ↔ Tempo settlement is real and reliable enough to run **underneath your own orchestration, credential, or guarantee layer** — rather than acting as a merchant or payer yourself? See **[Settlement proof: Base ↔ Tempo over x402 and MPP](docs/settlement-proof.md)**. It walks through a self-serve, on-chain-verifiable real settlement for both protocols, the reliability differences between them, and what the examples deliberately leave to the layer above the rail.

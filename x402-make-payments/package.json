@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "pay": "tsx src/client.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@atumlabs/x402-atum-escrow": "0.1.2",

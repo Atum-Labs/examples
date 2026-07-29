@@ -200,7 +200,8 @@ test(
         // Real settlement confirmed — make sure it wasn't the stub.
         const merchantLog = output();
         assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
-        assert.match(merchantLog, /→ 200: settled \(tx /, `expected a real settlement in the merchant log:\n${merchantLog}`);
+        assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
+        assert.match(merchantLog, /source deposit:.*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
         return;
       }
 

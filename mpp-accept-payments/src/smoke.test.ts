@@ -181,6 +181,32 @@ test("refuses to start in real-settlement mode with the default placeholder secr
   assert.match(output, /Refusing to start/, `expected the placeholder-secret guard to fire:\n${output}`);
 });
 
+test("refuses to start in real-settlement mode without a valid DEST_ADDRESS", async () => {
+  // A real (non-placeholder) secret so the secret guard passes and the DEST_ADDRESS
+  // guard is the one under test. DEST_ADDRESS is the .env.example placeholder.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    DOTENV_CONFIG_PATH: NO_DOTENV,
+    PORT: "4094",
+    USE_STUB_SUBMITTER: "false",
+    MPP_SECRET_KEY: randomBytes(32).toString("hex"),
+    DEST_ADDRESS: "0xYourMerchantAddressHere",
+  };
+
+  const merchant = spawn(tsxBin(MERCHANT_DIR), ["src/merchant.ts"], { cwd: MERCHANT_DIR, env });
+  let output = "";
+  merchant.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  merchant.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+
+  const exitCode: number = await new Promise((resolve) =>
+    merchant.once("exit", (code) => resolve(code ?? 1)),
+  );
+
+  assert.notEqual(exitCode, 0, `expected the merchant to refuse to start:\n${output}`);
+  assert.match(output, /Refusing to start/, `expected the DEST_ADDRESS guard to fire:\n${output}`);
+  assert.match(output, /DEST_ADDRESS/, `expected the DEST_ADDRESS guard specifically:\n${output}`);
+});
+
 // --- real end-to-end (opt-in; moves real testnet funds) --------------------
 //
 // Runs only when RUN_REAL_E2E=1 and a funded PRIVATE_KEY is set. It settles a real

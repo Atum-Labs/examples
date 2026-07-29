@@ -32,7 +32,7 @@ In stub mode, steps 4–5 are short-circuited in-process with a canned success �
 npm install
 ```
 
-The merchant itself has no private dependencies — it runs the stub flow with only public packages. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client, which needs early-access npm access — see that example and [Testing](#testing) below.)
+The merchant itself has no private dependencies — it runs the stub flow with only public packages. That's deliberate: x402's server side is a public spec, so this merchant is hand-rolled on public packages, unlike the [`mpp-accept-payments`](../mpp-accept-payments) merchant, which builds on Atum's `mppx` method. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client, which needs early-access npm access — see that example and [Testing](#testing) below.)
 
 ### 2. Configure environment
 
