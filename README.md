@@ -2,6 +2,14 @@
 
 Proprietary reference implementations for approved developers building applications that interoperate with Atum products and services. This repository is **not open source**; access is available only through Atum approval (see [License](#license) below).
 
+## Early access? Start here
+
+This repo is the fastest way to see an Atum payment work end-to-end — and during early access it's the **source of truth**: where anything else (the docs, an SDK default, an older guide) disagrees with these examples, follow the examples. They're pinned to the environment and corridor we actively test.
+
+- **New here?** Start in stub mode (no funds), then move to real settlement — see [Environments](#environments) below. The path we've hardened for this preview is [Base Sepolia ↔ Tempo](#hosted-testnet-production-testnet); other chains exist in the platform, but this corridor is the most predictable to test here.
+- **`production-testnet` is real but still hardening.** Expect the occasional slow corridor or timeout, and treat a timeout as *pending, not failed*: [verify settlement on-chain](docs/settlement-proof.md) before retrying, so you never pay twice.
+- **Hit a bump?** Email [support@atumlabs.xyz](mailto:support@atumlabs.xyz) and tell us the specific friction you ran into.
+
 ## Environments
 
 The examples run against three environments. Every merchant example defaults to the local stub, so real settlement is always opt-in.
@@ -25,13 +33,13 @@ Set the stub flag to `false` to settle for real over Atum's hosted testnet. The 
 | Payment Gateway (MPP settlement + x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://x402-facilitator.production-testnet.atum.xyz` |
 
-Atum supports many corridors ([supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded and have approved the source token (Permit2). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor)
+Atum supports many corridors ([supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded and have approved the source token (Permit2). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor).
 
 > **`production-testnet` is a testnet, and it is not yet hardened.**
 >
 > Expect the possibility of occasional failures and slow corridors: a failed or timed-out result might not necessarily be a confirmed failure.
 >
-> When using `production-testnet`, verify settlement on-chain before retrying.
+> When using `production-testnet`, verify settlement on-chain before retrying — so you never pay twice.
 
 ### Mainnet
 
@@ -77,7 +85,7 @@ To run one app in isolation, `cd` into it and run `npm test` (add `RUN_REAL_E2E=
 
 ## Evaluating settlement
 
-Taking an integration toward production and want to confirm that settlement over these protocols is real and independently verifiable — whether you're the merchant, the payer, or building a platform on top of the rail? See **[Settlement proof: verifying real settlement over x402 and MPP](docs/settlement-proof.md)**. It walks through a self-serve, on-chain-verifiable real settlement for both protocols, the reliability differences between them, and what the examples deliberately leave to the layer above.
+Taking an integration toward production and want to confirm that settlement over these protocols is real and independently verifiable — whether you're the merchant, the payer, or building a platform on top of the rail. See **[Settlement proof: verifying real settlement over x402 and MPP](docs/settlement-proof.md)**. It walks through a self-serve, on-chain-verifiable real settlement for both protocols, the reliability differences between them, and what the examples deliberately leave to the layer above.
 
 ## License
 
