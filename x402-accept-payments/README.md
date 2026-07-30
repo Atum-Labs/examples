@@ -32,7 +32,7 @@ In stub mode, steps 4–5 are short-circuited in-process with a canned success �
 npm install
 ```
 
-The merchant itself has no private dependencies — it runs the stub flow with only public packages. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client, which needs early-access npm access — see that example and [Testing](#testing) below.)
+The merchant itself has no private dependencies — it runs the stub flow with only public packages. That's deliberate: x402's server side is a public spec, so this merchant is hand-rolled on public packages, unlike the [`mpp-accept-payments`](../mpp-accept-payments) merchant, which builds on Atum's `mppx` method. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client, which needs early-access npm access — see that example and [Testing](#testing) below.)
 
 ### 2. Configure environment
 
@@ -91,7 +91,7 @@ Running it in your own private CI: provide an automation token with read access 
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
 > ```
 >
-> It asserts a real on-chain settlement and fails if it detects the stub, so it can never give a false pass.
+> Before the first funded run, approve **Permit2** on each source token you'll spend from — the x402 client aborts without an allowance (unlike the MPP client, which approves for you): `cast send <SOURCE_TOKEN> "approve(address,uint256)" 0x000000000022D473030F116dDEE9F6B43aC78BA3 <amount> --rpc-url <SOURCE_RPC> --private-key "$PRIVATE_KEY"`. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
 > **x402 settles synchronously.** The x402 facilitator (v1) confirms settlement only within the gateway's synchronous window (~30s, the server-side `payment_sync_wait_seconds`) — it has no async tail. If a corridor settles slower than that window, `/settle` returns `"settlement did not complete synchronously; the async tail is not supported in v1"` and the payment continues settling asynchronously without a synchronous confirmation. (This is the key difference from MPP, whose merchant polls the gateway for the async tail.) In that case the real e2e reports the limitation; set `ALLOW_ASYNC_TAIL=1` to treat a clean submission as a conditional pass (wiring verified up to submission).
 

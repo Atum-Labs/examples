@@ -64,7 +64,7 @@ const DEST_ADDRESS = ADDRESS_RE.test(RAW_DEST_ADDRESS)
 // Auction window for settlers to quote. 5s matches the SDK's DEFAULT_QUOTE_DEADLINE_SECONDS
 // (and the MPP example); must be strictly less than FULFILLMENT_DEADLINE_SECONDS.
 const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 5);
-const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 300);
+const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 120);
 
 // ---------------------------------------------------------------------------
 // x402 v2 header names. Each value is base64(JSON) — standard base64, no prefix.
@@ -302,6 +302,40 @@ const facilitator: Facilitator = USE_STUB_FACILITATOR ? stubFacilitator : httpFa
 const ASYNC_TAIL_RE = /async tail is not supported|did not complete synchronously/i;
 
 // ---------------------------------------------------------------------------
+// Settlement logging — print clickable explorer links instead of bare hashes,
+// the one-glance "did the funds move?" check (mirrors mpp-accept-payments).
+// Any chain not listed falls back to the raw hash plus its CAIP-2 id.
+// ---------------------------------------------------------------------------
+
+const TX_EXPLORERS: Record<string, string> = {
+  "eip155:84532": "https://sepolia.basescan.org/tx/", // Base Sepolia
+  "eip155:42431": "https://explore.testnet.tempo.xyz/tx/", // Tempo Moderato
+};
+
+function txLink(chainId: string | undefined, hash: string | undefined): string {
+  if (!hash) return "(none)";
+  const base = chainId ? TX_EXPLORERS[chainId] : undefined;
+  return base ? `${base}${hash}` : `${hash}${chainId ? ` (${chainId})` : ""}`;
+}
+
+// x402's /settle reports the *fulfillment* transaction (verified on-chain: a call to the
+// destination chain's fulfillmentProxy), NOT the source escrow deposit. Only label a leg when
+// the confirmation names it explicitly — otherwise print the tx without guessing the chain.
+function logSettlement(settled: SettleResponse): void {
+  const c = settled.fulfillmentConfirmation ?? {};
+  const sourceChain = c.source_chain_id as string | undefined;
+  const sourceHash = c.source_tx_hash as string | undefined;
+  const destChain = c.destination_chain_id as string | undefined;
+  const destHash = c.destination_tx_hash as string | undefined;
+  if (sourceHash) console.log(`    source deposit:     ${txLink(sourceChain, sourceHash)}`);
+  if (destHash) console.log(`    destination payout: ${txLink(destChain, destHash)}`);
+  if (!sourceHash && !destHash) {
+    console.log(`    settlement tx:      ${txLink(settled.network, settled.transaction)}`);
+    console.log(`    (facilitator reported one leg only — verify the other on-chain)`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -436,9 +470,10 @@ function buildApp(requirements: PaymentRequirements): express.Express {
     // Payment confirmed — attach the settlement receipt and return the resource.
     console.log(
       USE_STUB_FACILITATOR
-        ? `→ 200: settled (stub — no funds moved, tx ${settled.transaction})`
-        : `→ 200: settled (tx ${settled.transaction})`,
+        ? "→ 200: settled (stub — no funds moved)"
+        : "→ 200: settled",
     );
+    logSettlement(settled);
     res.setHeader(HEADER_PAYMENT_RESPONSE, encodeHeader(settled));
     res.json({ message: "Access granted.", data: "Your premium content here." });
   });

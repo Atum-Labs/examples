@@ -2,14 +2,16 @@
 
 An example client that programmatically pays for an HTTP-gated resource over the [Machine Payments Protocol (MPP)](https://mpp.dev) using Atum's `atum-escrow` method.
 
+> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+
+## How it works
+
 The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` with an `atum-escrow` challenge.
 2. Reads the corridor terms from the challenge.
 3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
 4. Retries the request with the signed credential and returns the final `200` response.
-
-> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
 
 ## Resilience: safe retries
 
@@ -80,7 +82,7 @@ npm test
 
 This verifies the retry behavior described above against a server that fails a couple of times before succeeding — no live merchant needed. To test this client together with a real `mpp-accept-payments` merchant instead, run `npm test` from [`../mpp-accept-payments`](../mpp-accept-payments) — that test drives both apps together.
 
-## Going to testnet or mainnet
+## Going to testnet / mainnet
 
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor: `MERCHANT_URL=http://localhost:4030/paid` (the sibling merchant) and `RPC_URL=https://sepolia.base.org` (the Base Sepolia source chain) are already set. To pay for real:
 

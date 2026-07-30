@@ -1,0 +1,17 @@
+{
+  "name": "atum-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root orchestration for the Atum x402 & MPP examples. Each example is a standalone project; these scripts just install, typecheck, and test them all together.",
+  "scripts": {
+    "install:all": "npm install --prefix x402-make-payments && npm install --prefix mpp-make-payments && npm install --prefix x402-accept-payments && npm install --prefix mpp-accept-payments",
+    "typecheck": "npm --prefix x402-make-payments run typecheck && npm --prefix mpp-make-payments run typecheck && npm --prefix x402-accept-payments run typecheck && npm --prefix mpp-accept-payments run typecheck",
+    "test": "npm run test:smoke",
+    "test:smoke": "npm --prefix x402-make-payments test && npm --prefix mpp-make-payments test && npm --prefix x402-accept-payments test && npm --prefix mpp-accept-payments test",
+    "test:e2e": "npm run test:e2e:mpp; m=$?; npm run test:e2e:x402; x=$?; exit $(( m | x ))",
+    "test:e2e:mpp": "RUN_REAL_E2E=1 npm --prefix mpp-accept-payments test",
+    "test:e2e:x402": "RUN_REAL_E2E=1 npm --prefix x402-accept-payments test",
+    "test:e2e:allow-pending": "ALLOW_ASYNC_TAIL=1 npm run test:e2e",
+    "test:all": "npm run test:smoke && npm run test:e2e"
+  }
+}
