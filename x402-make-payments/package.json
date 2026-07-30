@@ -10,7 +10,7 @@
     "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@atumlabs/x402-atum-escrow": "0.1.2",
+    "@atumlabs/x402-atum-escrow": "0.1.3",
     "@x402/core": "2.17.0",
     "@x402/fetch": "2.17.0",
     "dotenv": "^16.0.0",

@@ -10,7 +10,7 @@ import { ethers } from "ethers";
 import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
 import { registerAtumEscrowScheme } from "@atumlabs/x402-atum-escrow/client";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, REQUEST_ID } = process.env;
 
 if (!PRIVATE_KEY) {
   console.error("Error: PRIVATE_KEY is required in .env");
@@ -20,7 +20,18 @@ if (!PRIVATE_KEY) {
 const wallet = new ethers.Wallet(PRIVATE_KEY);
 const client = new x402Client();
 
-registerAtumEscrowScheme(client, { signer: wallet });
+// REQUEST_ID is the payment's idempotency key. The payer derives the single-use escrow
+// deposit nonce from (REQUEST_ID, payer address), so rebuilding the SAME payment with the
+// SAME REQUEST_ID reproduces the SAME nonce — a retry is then deduped on-chain and by the
+// Atum gateway instead of charging a second time. To stay safe:
+//   • set REQUEST_ID to a stable, per-payment value (e.g. your order/invoice id);
+//   • REUSE the exact same value when retrying THIS payment;
+//   • use a DIFFERENT value for every distinct payment — a reused id across two different
+//     payments would make the second one dedupe into the first and be rejected.
+// When REQUEST_ID is unset, the SDK generates a random id per run: fine for a one-shot demo,
+// but NOT retry-safe (a re-run would sign a fresh nonce and could double-pay). See the
+// "Avoiding double payments" section of the README.
+registerAtumEscrowScheme(client, { signer: wallet, requestId: REQUEST_ID });
 
 // Optional: preflight Permit2 allowance before signing so a missing
 // approve() fails fast here instead of reverting on-chain at settle.

@@ -17,7 +17,20 @@ The client handles the full payment flow automatically:
 
 x402's SDK handles the payment handshake for you: `wrapFetchWithPayment` (from `@x402/fetch`) makes the initial request, reads the `402`, signs the payment, and retries with the credential — all in one `fetchWithPayment` call. This example therefore doesn't ship a dedicated retry module the way [`mpp-make-payments`](../mpp-make-payments) does.
 
-If you add your own retries around a settled payment (e.g. on a transient `5xx`), follow the same rule that example documents: resend the **identical** signed payment rather than signing a new one — re-signing would be a distinct, second payment, and the Atum gateway is idempotent on an identical resubmission.
+If you add your own retries around a settled payment (e.g. on a transient `5xx`), follow the same rule that example documents: resend the **identical** signed payment rather than signing a new one — re-signing would be a distinct, second payment, and the Atum gateway is idempotent on an identical resubmission. If you instead re-run the client to retry (which re-signs), set a stable `REQUEST_ID` so the re-signed payment reuses the same deposit nonce and is deduped — see [Avoiding double payments](#avoiding-double-payments).
+
+## Avoiding double payments
+
+A double payment happens when a payer, unsure whether a slow settlement succeeded, **pays again**. The escrow deposit nonce is derived from `(REQUEST_ID, payer address)`, so setting and reusing a stable `REQUEST_ID` makes a retry reproduce the *same* nonce — the second attempt is deduped on-chain and by the Atum gateway instead of charging twice. Follow four rules:
+
+1. **One `REQUEST_ID` per payment** — derive it from something already unique per payment, such as your order or invoice id.
+2. **Reuse it verbatim on retry** of that same payment.
+3. **Never reuse it across different payments** — a new payment needs a new id, or the second payment dedupes into the first and is rejected.
+4. **Keep one payment per run** — this example pays once per invocation, which makes a per-run `REQUEST_ID` a per-payment id automatically. Do **not** wrap it in a loop that makes several payments under one fixed id (the second and later payments would collide on the nonce).
+
+**Retrying a "settlement pending" result** (see [Going to testnet / mainnet](#going-to-testnet--mainnet)): re-run with the **same** `REQUEST_ID`. Because the nonce is identical, the gateway recognizes the resubmission and will not charge again — so a retry is safe even before you can tell whether the first attempt settled.
+
+> Leaving `REQUEST_ID` blank uses a fresh random id each run, which is fine for a one-shot demo but **not** retry-safe: a re-run would sign a new nonce and could double-pay.
 
 ## Pair with x402-accept-payments
 
@@ -53,6 +66,7 @@ Edit `.env`:
 | `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client preflights your Permit2 allowance before signing. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
+| `REQUEST_ID` | No | Idempotency key for the payment. Set to a stable per-payment id (e.g. your order id) and reuse it on retry to avoid a double charge; use a distinct value per payment. Blank ⇒ a random, non-retry-safe id is used. See [Avoiding double payments](#avoiding-double-payments). |
 
 > **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
 
@@ -79,7 +93,7 @@ This client is exercised end-to-end by the smoke test in [`../x402-accept-paymen
 
 ## Going to testnet / mainnet
 
-> **⚠ Cross-chain settlement can be slower than x402 can confirm.** x402 settles **synchronously**: if cross-chain settlement outruns the facilitator's ~30s window (common on slow corridors like **Base ↔ Tempo**), the client prints a `402` with `"the async tail is not supported in v1"` and a "settlement pending" warning. That is **not** a confirmed failure — the payment was submitted and may still complete. Verify on-chain before retrying (a fresh retry is a *second* payment). Prefer fast corridors for a synchronous demo.
+> **⚠ Cross-chain settlement can be slower than x402 can confirm.** x402 settles **synchronously**: if cross-chain settlement outruns the facilitator's ~30s window (common on slow corridors like **Base ↔ Tempo**), the client prints a `402` with `"the async tail is not supported in v1"` and a "settlement pending" warning. That is **not** a confirmed failure — the payment was submitted and may still complete. If you set a stable `REQUEST_ID` ([Avoiding double payments](#avoiding-double-payments)), you can safely re-run with the **same** value — the retry is deduped, not a second payment. Otherwise a fresh retry *is* a second payment, so verify on-chain first. Prefer fast corridors for a synchronous demo.
 
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor — the merchant's default. To pay a real (non-stub) merchant:
 
