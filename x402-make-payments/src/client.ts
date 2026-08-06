@@ -9,7 +9,7 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { x402Client } from "@x402/fetch";
-import { registerAtumEscrowScheme } from "@atumlabs/x402-atum-escrow/client";
+import { registerAtumEscrowScheme, ensureSourceApproval } from "@atumlabs/x402-atum-escrow/client";
 import { wrapFetchWithAtumPayment } from "@atumlabs/x402-atum-escrow/fetch";
 import { payPurchase } from "./purchase.js";
 
@@ -42,26 +42,32 @@ const wallet = new ethers.Wallet(PRIVATE_KEY);
 const client = new x402Client();
 registerAtumEscrowScheme(client, { signer: wallet });
 
-// Optional: preflight Permit2 allowance before signing so a missing
-// approve() fails fast here instead of reverting on-chain at settle.
+// Optional: when RPC_URL is set, approve the source token (Permit2) before signing so the
+// escrow deposit does not revert at settlement. The token, chain, and exact amount come
+// from the 402, and this handler is awaited before the payment is built. `ensureSourceApproval`
+// reads the current allowance and only sends a transaction if it falls short, so it is a
+// no-op once approved. Leave RPC_URL unset against the stub merchant — there is no real
+// chain to approve on.
+//
+// Worth getting right up front: a deposit that reverts on-chain is a *terminal* settlement
+// failure, and a terminal failure spends that purchase identifier for good.
 if (RPC_URL) {
-  const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const signer = new ethers.Wallet(PRIVATE_KEY, new ethers.JsonRpcProvider(RPC_URL));
   const owner = await wallet.getAddress();
 
   client.onBeforePaymentCreation(async ({ selectedRequirements }) => {
-    const erc20 = new ethers.Contract(
-      selectedRequirements.asset,
-      ["function allowance(address,address) view returns (uint256)"],
-      provider,
+    const result = await ensureSourceApproval({
+      network: selectedRequirements.network,
+      token: selectedRequirements.asset,
+      owner,
+      signer,
+      requiredAllowance: BigInt(selectedRequirements.amount),
+    });
+    console.log(
+      result.alreadySufficient
+        ? "Source token already approved."
+        : `Approved source token (tx ${result.txHash}).`,
     );
-    const allowance = (await erc20.allowance(owner, PERMIT2)) as bigint;
-    if (allowance < BigInt(selectedRequirements.amount)) {
-      return {
-        abort: true,
-        reason: `Insufficient Permit2 allowance on ${selectedRequirements.asset}. Run approve(Permit2) on your source token first.`,
-      };
-    }
   });
 }
 

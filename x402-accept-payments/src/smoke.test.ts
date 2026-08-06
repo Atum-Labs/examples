@@ -269,7 +269,7 @@ interface Direction {
   sourceAsset: string;
   destNetwork: string;
   destAsset: string;
-  rpcUrl?: string; // source-chain RPC for the client's Permit2 preflight (optional)
+  rpcUrl?: string; // source-chain RPC for the client's Permit2 approval (optional)
 }
 
 const FORWARD: Direction = {
@@ -283,7 +283,7 @@ const FORWARD: Direction = {
 
 // Reverse pays FROM Tempo, so the payer must be funded on Tempo (pathUSD — which also
 // covers gas, since Tempo has no native gas token). The source-chain RPC for the Permit2
-// preflight defaults to the public Moderato endpoint; override with REVERSE_RPC_URL.
+// approval defaults to the public Moderato endpoint; override with REVERSE_RPC_URL.
 // Runs by default in a funded run; set SKIP_REVERSE=1 to skip it.
 const REVERSE: Direction = {
   label: "Tempo (Moderato) → Base Sepolia",
@@ -337,7 +337,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
 
   await withMerchant(port, merchantEnv, async ({ url, output }) => {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
-    // the other direction can't leak in and point the preflight at the wrong chain.
+    // the other direction can't leak in and point the approval at the wrong chain.
     const result = await withHeartbeat(`x402 real settlement (${dir.label})`, () =>
       runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
     );

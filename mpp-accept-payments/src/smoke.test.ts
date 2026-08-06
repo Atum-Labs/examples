@@ -331,7 +331,7 @@ interface Direction {
   sourceAsset: string;
   destNetwork: string;
   destAsset: string;
-  rpcUrl?: string; // source-chain RPC for the client's Permit2 preflight (optional)
+  rpcUrl?: string; // source-chain RPC for the client's Permit2 approval (optional)
 }
 
 const FORWARD: Direction = {
@@ -394,7 +394,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
 
   await withMerchant(port, merchantEnv, async ({ url, output }) => {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
-    // the other direction can't leak in and point the preflight at the wrong chain.
+    // the other direction can't leak in and point the approval at the wrong chain.
     const result = await withHeartbeat(`MPP real settlement (${dir.label})`, () =>
       runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
     );

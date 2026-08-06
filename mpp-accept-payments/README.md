@@ -152,4 +152,4 @@ src/
 ## Further reading
 
 - [MPP](https://mpp.dev)
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)

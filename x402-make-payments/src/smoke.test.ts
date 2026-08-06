@@ -184,7 +184,7 @@ function runClient(env: Record<string, string>): Promise<RunResult> {
 test("stub flow: 402 -> sign -> pay -> 200", async () => {
   const merchant = await startStubMerchant();
   try {
-    // No RPC_URL, so the client skips the on-chain Permit2 preflight and signs offline.
+    // No RPC_URL, so the client skips the on-chain Permit2 approval and signs offline.
     const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: merchant.url, RPC_URL: "" });
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);

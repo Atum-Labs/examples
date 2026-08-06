@@ -6,7 +6,7 @@ The question it answers is: **is settlement over these protocols real, verifiabl
 
 > **Proprietary reference material.** See the [root README](../README.md) and [`LICENSE`](../LICENSE). Chains, assets, corridors, gateway, and facilitator shown here are illustrative and require separate Atum authorization.
 
-> **Corridor.** Atum supports many corridors ([supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets)); the one these examples are **tested and hardened** against — and wired to out of the box — is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. See the [root README](../README.md) for its hardening status, and each app's `.env.example` for the exact chains, assets, and addresses. The proof method below is corridor-agnostic — the commands just use the hardened corridor for concreteness; to prove another supported corridor, point the examples at it and substitute the source/destination chains, assets, and block explorers.
+> **Corridor.** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples are **tested and hardened** against — and wired to out of the box — is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. See the [root README](../README.md) for its hardening status, and each app's `.env.example` for the exact chains, assets, and addresses. The proof method below is corridor-agnostic — the commands just use the hardened corridor for concreteness; to prove another supported corridor, point the examples at it and substitute the source/destination chains, assets, and block explorers.
 
 ## What these examples prove 
 
@@ -142,4 +142,4 @@ These are illustrative. Other participants in the rail may carry related respons
 
 - [Root README](../README.md) — environments (stub / testnet / mainnet) and the corridor.
 - [`x402-accept-payments`](../x402-accept-payments/README.md) and [`mpp-accept-payments`](../mpp-accept-payments/README.md) — the merchant/settlement side.
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)

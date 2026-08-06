@@ -79,7 +79,7 @@ Edit `.env`:
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
-| `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client preflights your Permit2 allowance before signing. Leave blank against the stub merchant. |
+| `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
 | `PURCHASE_ID` | No | Names the purchase being paid for. Each run generates and prints one, so leave it unset — pass it on the command line only to resume a payment interrupted while still settling. See [Retries and idempotency](#retries-and-idempotency). |
 
@@ -119,22 +119,9 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 
 1. `PRIVATE_KEY=` — the payer wallet's key.
 2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for gas. For the reverse leg, also fund it on **Tempo** with `pathUSD` — that covers both the payment and gas, since Tempo has no native gas token (see the root README's `cast rpc tempo_fundAddress` faucet command).
-3. Approve **Permit2** once per source token, per chain — the escrow pulls your funds through it, and this client refuses to sign without an allowance:
+3. Set `RPC_URL=https://sepolia.base.org` (or the source chain you are paying from). The client then approves **Permit2** for you before signing, via `ensureSourceApproval` — the escrow pulls your funds through Permit2, so the approval has to exist or the deposit reverts at settlement. It reads the current allowance first and only sends a transaction when it falls short, so it is a no-op on later runs.
 
-   ```bash
-   # Base Sepolia USDC
-   cast send 0x036CbD53842c5426634e7929541eC2318f3dCF7e "approve(address,uint256)" \
-     0x000000000022D473030F116dDEE9F6B43aC78BA3 1000000000 \
-     --rpc-url https://sepolia.base.org --private-key "$PRIVATE_KEY"
-
-   # Tempo pathUSD — needed to pay *from* Tempo (the reverse leg)
-   cast send 0x20c0000000000000000000000000000000000000 "approve(address,uint256)" \
-     0x000000000022D473030F116dDEE9F6B43aC78BA3 1000000000 \
-     --rpc-url https://rpc.moderato.tempo.xyz --private-key "$PRIVATE_KEY"
-   ```
-
-   `mpp-make-payments` does this for you via `ensureSourceApproval`; this client only checks and aborts. An escrow deposit that reverts on-chain is a *terminal* settlement failure, and a terminal failure spends that purchase identifier — so getting the allowance right up front keeps it usable.
-4. Set `RPC_URL=https://sepolia.base.org` so the client preflights that allowance before signing — it aborts with a clear message rather than reverting on-chain at settle.
+   Worth getting right up front: a deposit that reverts on-chain is a *terminal* settlement failure, and a terminal failure spends that purchase identifier for good.
 
 Make sure the paired merchant is running in real mode (`USE_STUB_FACILITATOR=false`, see [`x402-accept-payments`](../x402-accept-payments)).
 
@@ -152,6 +139,6 @@ src/
 
 ## Further reading
 
-- [x402 Facilitator API reference](https://docs.atumlabs.xyz/api-reference/x402/introduction)
+- [x402 Facilitator API reference](https://docs.atum.xyz/api-reference/x402/introduction)
 - [x402 protocol](https://x402.org)
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)

@@ -91,7 +91,7 @@ Running it in your own private CI: provide an automation token with read access 
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
 > ```
 >
-> Before the first funded run, approve **Permit2** on each source token you'll spend from — the x402 client aborts without an allowance (unlike the MPP client, which approves for you): `cast send <SOURCE_TOKEN> "approve(address,uint256)" 0x000000000022D473030F116dDEE9F6B43aC78BA3 <amount> --rpc-url <SOURCE_RPC> --private-key "$PRIVATE_KEY"`. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
+> The payer approves **Permit2** for each source token itself (`ensureSourceApproval`), so there is no manual setup step — just make sure the wallet has gas on the source chain. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
 > **A slow corridor needs nothing special.** When settlement outruns the gateway's synchronous window (~30s), the facilitator reports the payment as still settling and the payer re-attempts the same purchase until it has a terminal outcome — so the funded run settles either way. See [Settlement outcomes](#settlement-outcomes).
 
@@ -130,7 +130,7 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
 
 The payer funds the payment (source token + gas) — see [`x402-make-payments`](../x402-make-payments). On a successful real settlement the merchant logs the settlement transaction:
 
@@ -158,6 +158,6 @@ src/
 
 ## Further reading
 
-- [x402 Facilitator API reference](https://docs.atumlabs.xyz/api-reference/x402/introduction)
+- [x402 Facilitator API reference](https://docs.atum.xyz/api-reference/x402/introduction)
 - [x402 protocol](https://x402.org)
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)
