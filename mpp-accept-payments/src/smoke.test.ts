@@ -357,7 +357,27 @@ const REVERSE: Direction = {
 };
 
 // Final "what settled where" summary, pulled from the merchant's own settlement log.
-function printSettlementReport(protocol: string, dir: Direction, merchantLog: string): void {
+/**
+ * How many attempts the payer needed, read from its own log, plus the pending lines when it
+ * took more than one. A settlement that outruns the gateway's synchronous window is
+ * collected by re-attempting the purchase — without this the run just looks slow, and the
+ * retry that did the work is invisible.
+ */
+function attemptSummary(clientLog: string): string {
+  const attempts = Number(clientLog.match(/settled after (\d+) attempt\(s\)/)?.[1] ?? "1");
+  if (attempts <= 1) return `     attempts:            1 (settled inside the gateway's synchronous window)\n`;
+  const pending = clientLog
+    .split("\n")
+    .filter((line) => line.includes("still settling"))
+    .map((line) => `       ${line.trim()}\n`)
+    .join("");
+  return (
+    `     attempts:            ${attempts} (settlement outran the ~30s window; the re-attempt collected it)\n` +
+    pending
+  );
+}
+
+function printSettlementReport(protocol: string, dir: Direction, merchantLog: string, clientLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
   const paymentId = merchantLog.match(/settled payment (\S+)/)?.[1];
@@ -369,6 +389,7 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
       `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED (${dir.label})\n` +
       (paymentId ? `     payment id:          ${paymentId}\n` : "") +
       `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
+      attemptSummary(clientLog) +
       `     amount:              ${amount} (atomic) paid to ${dest}\n` +
       `     source deposit:      ${deposit}\n` +
       (payout ? `     destination payout:  ${payout}\n` : "") +
@@ -411,7 +432,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
       /settled payment 0x[0-9a-f]/i,
       `expected a real on-chain settlement in the merchant log:\n${merchantLog}`,
     );
-    printSettlementReport("MPP", dir, merchantLog);
+    printSettlementReport("MPP", dir, merchantLog, result.output);
   });
 }
 

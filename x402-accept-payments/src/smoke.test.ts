@@ -295,7 +295,27 @@ const REVERSE: Direction = {
 };
 
 // Final "what settled where" summary, pulled from the merchant's own settlement log.
-function printSettlementReport(protocol: string, dir: Direction, merchantLog: string): void {
+/**
+ * How many attempts the payer needed, read from its own log, plus the pending lines when it
+ * took more than one. A settlement that outruns the gateway's synchronous window is
+ * collected by re-attempting the purchase — without this the run just looks slow, and the
+ * retry that did the work is invisible.
+ */
+function attemptSummary(clientLog: string): string {
+  const attempts = Number(clientLog.match(/settled after (\d+) attempt\(s\)/)?.[1] ?? "1");
+  if (attempts <= 1) return `     attempts:            1 (settled inside the gateway's synchronous window)\n`;
+  const pending = clientLog
+    .split("\n")
+    .filter((line) => line.includes("still settling"))
+    .map((line) => `       ${line.trim()}\n`)
+    .join("");
+  return (
+    `     attempts:            ${attempts} (settlement outran the ~30s window; the re-attempt collected it)\n` +
+    pending
+  );
+}
+
+function printSettlementReport(protocol: string, dir: Direction, merchantLog: string, clientLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
   const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1];
@@ -316,6 +336,7 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
     `\n${bar}\n` +
       `  ✅ ${protocol} — SETTLED (${dir.label})\n` +
       `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
+      attemptSummary(clientLog) +
       `     expected amount:     ${amount} (atomic) to ${dest}  — confirm on-chain below\n` +
       `${txLines}\n` +
       `${bar}\n\n`,
@@ -349,7 +370,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
       assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
       assert.match(merchantLog, /→ 200: settled\b/, `expected a settled 200 in the merchant log:\n${merchantLog}`);
       assert.match(merchantLog, /(source deposit|destination payout|settlement tx):\s+\S*0x[0-9a-fA-F]{64}/, `expected a real settlement tx in the merchant log:\n${merchantLog}`);
-      printSettlementReport("x402", dir, merchantLog);
+      printSettlementReport("x402", dir, merchantLog, result.output);
       return;
     }
 
