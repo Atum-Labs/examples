@@ -157,12 +157,74 @@ test("concurrent payments from different wallets all succeed", async () => {
 });
 
 test("the same wallet can complete multiple independent payments in sequence", async () => {
-  await withMerchant(4096, STUB_ENV, async ({ url }) => {
+  await withMerchant(4096, STUB_ENV, async ({ url, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
       const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
       assertPaid(result, `payment ${i + 1}`);
     }
+    // Each run names a new purchase, so these are three distinct payments — not one
+    // payment re-served three times.
+    assert.doesNotMatch(
+      output(),
+      /already fulfilled/,
+      `distinct purchases must not collapse onto one payment:\n${output()}`,
+    );
+  });
+});
+
+test("a still-settling payment is collected by the payer's re-attempt", async () => {
+  // The stub reports the first attempt as still settling, as the gateway does when
+  // cross-chain settlement outruns its ~30s synchronous window.
+  await withMerchant(4094, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
+    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    assertPaid(result, "client");
+    assert.match(
+      result.output,
+      /still settling \(payment pay_stub_[0-9a-f]+\)/,
+      `expected the payer to report the pending attempt:\n${result.output}`,
+    );
+    // The merchant must NOT hold the request open waiting for settlement.
+    assert.match(
+      output(),
+      /accepted, still settling — the payer's re-attempt/,
+      `expected the merchant to return pending rather than wait:\n${output()}`,
+    );
+  });
+});
+
+test("re-attempting a fulfilled purchase re-serves it instead of delivering twice", async () => {
+  await withMerchant(4093, STUB_ENV, async ({ url, output }) => {
+    // The same purchase paid twice — what a payer does when it never received the first
+    // 200, and what happens when one identifier is reused across two purchases. Both
+    // resolve to one payment, so the merchant must deliver once.
+    const purchaseId = "order_fulfilled_once_0001";
+    const key = randomPrivateKey();
+    for (const label of ["first", "re-attempt"]) {
+      const result = await runClient({
+        PRIVATE_KEY: key,
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        PURCHASE_ID: purchaseId,
+      });
+      assertPaid(result, label);
+    }
+    assert.match(
+      output(),
+      /was already fulfilled — re-serving, not a new sale/,
+      `expected the second attempt to be recognised as already fulfilled:\n${output()}`,
+    );
+  });
+});
+
+test("refuses a request that does not name the purchase", async () => {
+  await withMerchant(4092, STUB_ENV, async ({ url }) => {
+    // Without an identifier the challenge carries no payment identity, the payer's client
+    // refuses to sign, and a retry could not be told from a second payment.
+    const res = await fetch(url);
+    assert.equal(res.status, 400, "a request with no purchase in the URL must be refused");
+    const body = (await res.json()) as { error?: string };
+    assert.match(String(body.error), /Name the purchase in the URL/);
   });
 });
 
@@ -221,22 +283,21 @@ test("refuses to start in real-settlement mode without a valid DEST_ADDRESS", as
 // Runs only when RUN_REAL_E2E=1 and a funded PRIVATE_KEY is set. It settles a real
 // Base -> Tempo payment through the hosted gateway and asserts the merchant logged a
 // real settlement — failing loudly if it sees the stub payment id, so it can never
-// give a false pass. MPP has no separate facilitator: the merchant polls the gateway
-// past its synchronous window until settlement is terminal, so (unlike x402 v1) a
-// slow cross-chain corridor still resolves to a confirmed result here.
+// give a false pass. MPP has no separate facilitator: the merchant verifies and submits
+// in-process, and when settlement outruns the gateway's synchronous window the payer's
+// re-attempt at the same purchase is what collects the result.
 //
 // A fresh MPP_SECRET_KEY is generated per run (any private >= 32-byte secret works —
 // the same merchant issues and verifies the challenge). Optional overrides:
 // GATEWAY_URL, RPC_URL (defaults to Base Sepolia), FULFILLMENT_DEADLINE_SECONDS.
 const REAL_E2E_ENABLED = process.env.RUN_REAL_E2E === "1" && !!process.env.PRIVATE_KEY;
 
-// The MPP merchant polls the gateway past its synchronous window until settlement is
-// terminal, so a real cross-chain run can take 60–120s. The polling happens in a child
-// process whose logs are captured (not echoed), so print elapsed seconds while we wait —
-// otherwise the terminal looks frozen.
+// A real cross-chain run can take 60–120s, spread across the payer's re-attempts. Those
+// run in a child process whose logs are captured (not echoed), so print elapsed seconds
+// while we wait — otherwise the terminal looks frozen.
 async function withHeartbeat<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const start = Date.now();
-  process.stdout.write(`  ⏳ ${label}: settling on-chain (merchant is polling the gateway)…\n`);
+  process.stdout.write(`  ⏳ ${label}: settling on-chain…\n`);
   const timer = setInterval(() => {
     process.stdout.write(`  ⏳ ${label}: still settling — ${Math.round((Date.now() - start) / 1000)}s elapsed\n`);
   }, 10_000);

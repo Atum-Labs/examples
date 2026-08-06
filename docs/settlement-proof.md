@@ -28,7 +28,7 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 
 - **The fiat leg.** No card authorization/capture, no on-ramp/off-ramp. The corridor is stablecoin → stablecoin only.
 - **Credential or token issuance.** No agent-credential minting, tokenization, or identity — the payer here simply holds a key.
-- **Disputes, chargebacks, refunds, or reversals** beyond idempotent retry of an identical credential.
+- **Disputes, chargebacks, refunds, or reversals** beyond the idempotent re-attempt of a purchase described below.
 
 ## Prerequisites for settlement proof
 
@@ -37,7 +37,7 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 - A **funded wallet on every chain it spends from** — for the shipped corridor that's Base Sepolia (testnet USDC to spend, plus ETH for gas) and, because the funded test settles **both directions** by default, Tempo (Moderato) as well (pathUSD, which also covers gas: `cast rpc tempo_fundAddress <your-address> --rpc-url https://rpc.moderato.tempo.xyz`). Set `SKIP_REVERSE=1` to run the forward leg only and fund just one chain.
 - A **receiving address on the destination chain** — for the shipped corridor, Tempo (Moderato), where the merchant is paid out.
 
-> Real testnet funds move. A failed or timed-out result on `production-testnet` is not necessarily a confirmed failure — verify on-chain before retrying (a fresh retry with a *new* credential is a second payment).
+> Real testnet funds move. A settlement that outruns the gateway's ~30s synchronous window is not a failure: re-attempting the **same purchase** resolves onto the original payment and returns its outcome, and cannot charge twice. What you must not do is pay again under a *new* purchase identifier — that is a second payment.
 
 ## The self-serve proof
 
@@ -45,7 +45,7 @@ Both protocols ship an opt-in real-settlement test, gated on `RUN_REAL_E2E=1` so
 
 ### MPP (recommended)
 
-On the shipped Base ↔ Tempo corridor MPP settles about as fast as x402 (~25–40s per leg). Its edge isn't speed — it's that the merchant polls the gateway to a terminal state, so if a corridor ever settles slower than x402 v1 can confirm synchronously, MPP still resolves to a confirmed result instead of giving up (see [Reliability](#reliability-characteristics)).
+On the shipped Base ↔ Tempo corridor both protocols settle at comparable speed (~25–40s per leg) and behave identically when settlement runs long (see [Reliability](#reliability-characteristics)). Choose between them on integration shape, not on settlement reliability.
 
 ```bash
 # one-time: install the restricted client + merchant packages
@@ -100,7 +100,7 @@ RUN_REAL_E2E=1 \
   npm test
 ```
 
-On a synchronous settlement the merchant logs `→ 200: settled`, followed by the settlement transaction link(s). If the corridor settles slower than the facilitator's synchronous window, the test **fails by design** with the async-tail explanation; set `ALLOW_ASYNC_TAIL=1` to accept "submitted, settling asynchronously" as a conditional pass (wiring verified up to submission). Optional overrides: `RPC_URL` (default `https://sepolia.base.org`), `FACILITATOR_URL`, `GATEWAY_URL`.
+The merchant logs `→ 200: settled`, followed by the settlement transaction link(s). If the corridor settles slower than the gateway's synchronous window, the payer re-attempts the purchase until it does — the run takes longer, and the outcome is the same. Optional overrides: `RPC_URL` (default `https://sepolia.base.org`), `FACILITATOR_URL`, `GATEWAY_URL`.
 
 ## Independent verification
 
@@ -114,13 +114,17 @@ If both transactions confirm on their respective chains, the corridor settled �
 
 ## Reliability characteristics
 
-| | x402 (v1 facilitator) | MPP |
-| --- | --- | --- |
-| Settlement confirmation | **Synchronous only** — the facilitator confirms within the gateway's `payment_sync_wait_seconds` (~30s). No async tail. | Merchant **polls** `GET /payments/{id}/status` to a terminal state (up to the fulfillment deadline). |
-| Behavior when settlement is slow (e.g. the shipped Base ↔ Tempo corridor) | Returns `"async tail is not supported in v1"`; the payment keeps settling but **cannot be confirmed synchronously**. Not a confirmed failure. | Waits it out and reports the terminal result. |
-| Idempotency / retry | Resending the **identical** signed credential is idempotent (the gateway returns the original result, not a second charge). Never build a new credential for a retry. | Same — see `mpp-make-payments/src/retry.ts` and its tests. |
+Both protocols now behave the same way, because both rest on the same guarantee: a payment has a stable identity, and re-attempting it resolves onto the original payment instead of taking a second one.
 
-**Takeaway:** on the shipped Base ↔ Tempo corridor both protocols settle at comparable speed (~25–40s per leg); MPP additionally **survives the async tail** — it polls to a terminal state, so it always resolves to a confirmed result. Prefer **MPP** for a deterministic confirmation. If you use x402, your integration must treat a pending/async-tail result as *unconfirmed, not failed*, and reconcile against on-chain state before retrying.
+| | x402 | MPP |
+| --- | --- | --- |
+| Behaviour when settlement is slow | The facilitator reports `settlement_pending` with the payment id. Nothing is held open. | `verify()` raises `SettlementPendingError` with the payment id. Nothing is held open, and the merchant does **not** poll. |
+| How the outcome is collected | The payer re-attempts the same purchase until it reaches a terminal outcome. | Identical. |
+| Naming the purchase | The payer supplies `paymentIdentifier`; it rides in the payment. **The merchant's API is unchanged.** | The merchant stamps `intentId` into the challenge, read from its own route (`/invoices/4711/pdf` already has it). |
+| Terminal failure | That identifier is spent for good; the same goods need a NEW one. | Identical. |
+| Delivering once | The merchant's own job: key fulfilment on the receipt's `payment_id`, never on the request. | Identical. |
+
+**Takeaway:** settlement reliability is no longer a reason to prefer one protocol over the other — on the shipped Base ↔ Tempo corridor they settle at comparable speed (~25–40s per leg) and resolve a slow settlement the same way. Choose on integration shape: x402 asks nothing of your API, while MPP needs one value your route already carries.
 
 ## Beyond settlement: what you still build
 

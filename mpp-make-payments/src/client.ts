@@ -6,17 +6,41 @@
  */
 
 import "dotenv/config";
+import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { Mppx } from "mppx/client";
 import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atumlabs/mppx-atum-escrow/client";
-import { sendWithRetries } from "./retry.js";
+import { payPurchase } from "./purchase.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID } = process.env;
 
 if (!PRIVATE_KEY) {
   console.error("Error: PRIVATE_KEY is required in .env");
   process.exit(1);
 }
+
+// Names the purchase this run is paying for. The merchant stamps it into the 402
+// challenge, the client derives the payment's identity from it, and Atum resolves a
+// re-attempt onto the original payment instead of taking a second one.
+//
+// This identifies ONE PAYMENT, not an order. An order can outlive several payments: if a
+// payment fails terminally its identifier is spent for good, and charging for the same
+// goods again means a new identifier. So a real merchant derives this from both — e.g.
+// `${order.id}-${order.paymentAttempts}` → "books-123-2". See the README.
+//
+// A fresh id per run is the safe default: each run is a new payment. Set PURCHASE_ID to
+// resume one that was interrupted while it was still settling:
+//
+//   PURCHASE_ID=<the id printed below> npm run pay
+//
+// Don't put PURCHASE_ID in .env: a value left set there would make every run re-attempt
+// the same payment, and later runs would be served without paying.
+const purchaseId = PURCHASE_ID || `order_${randomBytes(10).toString("hex")}`;
+
+// The purchase is part of the resource, the way an invoice or job id already is in most
+// merchant APIs (/invoices/4711/pdf). That is how the merchant knows which purchase to
+// name in the challenge, before any payment exists.
+const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(purchaseId)}`;
 
 // The source-chain account is derived from the key. The server rejects a credential
 // whose deposit signature does not recover to this account, so the two must match.
@@ -53,38 +77,36 @@ if (RPC_URL) {
   });
 }
 
-// Build the credential once with mppx.createCredential() and hand the SAME bytes to
-// every retry attempt — see ./retry.ts for why, and its own test for a proof that a
-// failing-then-recovering server gets the identical credential on every attempt.
-async function payWithCredential(credential: string): Promise<Response> {
-  return mppx.rawFetch(MERCHANT_URL, { headers: { Authorization: credential } });
+/**
+ * One attempt at the purchase: ask for the resource, sign a credential for the challenge
+ * it answers with, and resubmit. `mppx.rawFetch` bypasses mppx's own automatic 402
+ * handling so the re-attempt loop in ./purchase.ts drives the pacing.
+ *
+ * Every attempt signs a NEW credential, because the challenge's deadlines are absolute
+ * timestamps. The purchase identifier is what stays fixed, and it comes from the URL.
+ */
+async function attemptPurchase(): Promise<Response> {
+  const challengeResponse = await mppx.rawFetch(resourceUrl);
+  if (challengeResponse.status !== 402) return challengeResponse;
+  const credential = await mppx.createCredential(challengeResponse);
+  return mppx.rawFetch(resourceUrl, { headers: { Authorization: credential } });
 }
 
-async function report(res: Response): Promise<void> {
-  const receipt = res.headers.get("payment-receipt");
-  const body = await res.json().catch(() => res.text());
-  console.log(`Status: ${res.status}`);
+console.log(`Requesting ${resourceUrl} …`);
+console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
+
+try {
+  // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
+  // the gateway's ~30s synchronous window; the re-attempt is what collects the outcome.
+  const response = await payPurchase(attemptPurchase);
+  const receipt = response.headers.get("payment-receipt");
+  const body = await response.json().catch(() => response.text());
+
+  console.log(`Status: ${response.status}`);
   console.log(`Payment-Receipt header: ${receipt ? "present" : "(none)"}`);
   console.log(JSON.stringify(body, null, 2));
-}
-
-console.log(`Requesting ${MERCHANT_URL} …`);
-try {
-  // mppx.rawFetch bypasses mppx's own automatic 402-handling, so we can drive the
-  // challenge -> credential -> retry sequence manually and control retries ourselves.
-  // This first request carries no credential and has no side effects, so retrying it
-  // on a transient failure is always safe — unlike the signed request below, where a
-  // retry must reuse the identical credential rather than sign a new one.
-  const challengeResponse = await sendWithRetries(() => mppx.rawFetch(MERCHANT_URL));
-  if (challengeResponse.status !== 402) {
-    // Not a payment challenge (already open, or an unrelated error) — nothing to pay for.
-    await report(challengeResponse);
-  } else {
-    const credential = await mppx.createCredential(challengeResponse);
-    const res = await sendWithRetries(() => payWithCredential(credential));
-    await report(res);
-  }
+  if (!response.ok) process.exit(1);
 } catch (err) {
-  console.error("payment failed:", (err as Error).message);
+  console.error(`Purchase ${purchaseId} did not complete: ${(err as Error).message}`);
   process.exit(1);
 }
