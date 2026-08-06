@@ -41,10 +41,12 @@ function randomPrivateKey(): string {
   return `0x${randomBytes(32).toString("hex")}`;
 }
 
-// A well-formed atum-escrow 402 challenge the client's scheme can sign offline.
+// A well-formed atum-escrow 402 challenge the client's scheme can sign offline. Like the
+// real merchant, it declares that the payer must name the purchase it is paying for.
 const CHALLENGE = {
   x402Version: 2,
   resource: { url: "http://stub/paid", description: "Example premium resource" },
+  extensions: { "payment-identifier": { info: { required: true } } },
   accepts: [
     {
       scheme: "atum-escrow",
@@ -77,13 +79,27 @@ const CHALLENGE = {
 const encodeHeader = (value: unknown): string =>
   Buffer.from(JSON.stringify(value), "utf8").toString("base64");
 
-// Stub merchant: 402 with the challenge until a payment credential shows up, then
-// 200 with the resource. It does not verify the signature (the SDK's job) — it only
-// proves the client completes the handshake end to end.
-function startStubMerchant(): Promise<{ url: string; close: () => void }> {
+const decodeHeader = (value: string): Record<string, unknown> =>
+  JSON.parse(Buffer.from(value, "base64").toString("utf8")) as Record<string, unknown>;
+
+const STUB_PAYMENT_ID = "pay_stub_0000000000000000";
+
+/**
+ * Stub merchant: 402 with the challenge until a payment shows up, then 200 with the
+ * resource. It does not verify the signature (the SDK's job) — it only proves the client
+ * completes the handshake end to end.
+ *
+ * `pendingAttempts` makes the first N presented payments answer `settlement_pending`, as
+ * the real facilitator does when cross-chain settlement outruns the gateway's synchronous
+ * window, so the client's re-attempt loop is exercised.
+ */
+function startStubMerchant(pendingAttempts = 0): Promise<StubMerchant> {
+  // The purchase identifier each presented payment named, in order. Every attempt at one
+  // purchase must name the same value — that is what makes them one payment.
+  const presented: string[] = [];
   const server = http.createServer((req, res) => {
-    const paid = Boolean(req.headers["payment-signature"] ?? req.headers["x-payment"]);
-    if (!paid) {
+    const payment = (req.headers["payment-signature"] ?? req.headers["x-payment"]) as string | undefined;
+    if (!payment) {
       res
         .writeHead(402, {
           "content-type": "application/json",
@@ -92,10 +108,37 @@ function startStubMerchant(): Promise<{ url: string; close: () => void }> {
         .end(JSON.stringify(CHALLENGE));
       return;
     }
+
+    const extensions = decodeHeader(payment).extensions as
+      | { "payment-identifier"?: { info?: { id?: string } } }
+      | undefined;
+    presented.push(extensions?.["payment-identifier"]?.info?.id ?? "(unnamed)");
+
+    if (presented.length <= pendingAttempts) {
+      const pending = {
+        success: false,
+        errorReason: "settlement_pending",
+        errorMessage: "still settling; re-attempt the purchase under the same identifier",
+        extensions: { atum: { paymentId: STUB_PAYMENT_ID, state: "pending" } },
+      };
+      res
+        .writeHead(402, {
+          "content-type": "application/json",
+          "PAYMENT-REQUIRED": encodeHeader(CHALLENGE),
+          "PAYMENT-RESPONSE": encodeHeader(pending),
+        })
+        .end(JSON.stringify(CHALLENGE));
+      return;
+    }
+
     res
       .writeHead(200, {
         "content-type": "application/json",
-        "PAYMENT-RESPONSE": encodeHeader({ success: true, transaction: `0x${"11".repeat(32)}` }),
+        "PAYMENT-RESPONSE": encodeHeader({
+          success: true,
+          transaction: `0x${"11".repeat(32)}`,
+          extensions: { atum: { paymentId: STUB_PAYMENT_ID, state: "completed" } },
+        }),
       })
       .end(JSON.stringify({ message: "Access granted.", data: "Your premium content here." }));
   });
@@ -106,9 +149,17 @@ function startStubMerchant(): Promise<{ url: string; close: () => void }> {
       resolve({
         url: `http://127.0.0.1:${port}/paid`,
         close: () => server.close(),
+        presented: () => presented,
       });
     });
   });
+}
+
+interface StubMerchant {
+  url: string;
+  close: () => void;
+  /** The purchase identifier each presented payment named, in order. */
+  presented: () => string[];
 }
 
 interface RunResult {
@@ -138,6 +189,51 @@ test("stub flow: 402 -> sign -> pay -> 200", async () => {
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
     assert.match(result.output, /Access granted/, `expected the resource body:\n${result.output}`);
+
+    // The payment must name the purchase, or the gateway could not de-duplicate a retry.
+    assert.deepEqual(merchant.presented().length, 1, "expected exactly one payment");
+    assert.match(
+      merchant.presented()[0],
+      /^order_[0-9a-f]{20}$/,
+      `expected a generated purchase identifier, got ${merchant.presented()[0]}`,
+    );
+  } finally {
+    merchant.close();
+  }
+});
+
+test("a still-settling payment is collected by re-attempting the same purchase", async () => {
+  // One pending answer, then settled — the shape of a cross-chain settlement that outruns
+  // the gateway's synchronous window.
+  const merchant = await startStubMerchant(1);
+  try {
+    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: merchant.url, RPC_URL: "" });
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.match(result.output, /still settling/, `expected the pending attempt to be reported:\n${result.output}`);
+    assert.match(result.output, /Status: 200/, `expected the re-attempt to be served:\n${result.output}`);
+
+    // Two attempts, ONE purchase. If these differed, the re-attempt would have been a
+    // second payment rather than a retry of the first.
+    const presented = merchant.presented();
+    assert.equal(presented.length, 2, `expected a re-attempt, got ${presented.length} payment(s)`);
+    assert.equal(presented[0], presented[1], "every attempt at one purchase must name the same identifier");
+  } finally {
+    merchant.close();
+  }
+});
+
+test("resuming a purchase reuses its identifier instead of generating a new one", async () => {
+  const merchant = await startStubMerchant();
+  try {
+    const purchaseId = "order_resumed_0123456789";
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: merchant.url,
+      RPC_URL: "",
+      PURCHASE_ID: purchaseId,
+    });
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.deepEqual(merchant.presented(), [purchaseId], "PURCHASE_ID must name the purchase verbatim");
   } finally {
     merchant.close();
   }

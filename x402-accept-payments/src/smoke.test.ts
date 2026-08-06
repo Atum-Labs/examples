@@ -147,12 +147,57 @@ test("concurrent payments from different wallets all succeed", async () => {
 });
 
 test("the same wallet can pay more than once in sequence", async () => {
-  await withMerchant(4086, STUB_ENV, async ({ url }) => {
+  await withMerchant(4086, STUB_ENV, async ({ url, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
       const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
       assertPaid(result, `payment ${i + 1}`);
     }
+    // Each run names a new purchase, so these are three distinct payments — not one
+    // payment re-served three times.
+    assert.doesNotMatch(
+      output(),
+      /already fulfilled/,
+      `distinct purchases must not collapse onto one payment:\n${output()}`,
+    );
+  });
+});
+
+test("a still-settling payment is collected by the payer's re-attempt", async () => {
+  // The stub reports the first attempt as still settling, as the facilitator does when
+  // cross-chain settlement outruns the gateway's ~30s synchronous window.
+  await withMerchant(4084, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
+    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    assertPaid(result, "client");
+    assert.match(
+      output(),
+      /402: still settling \(payment pay_stub_[0-9a-f]+\) — awaiting the payer's re-attempt/,
+      `expected the merchant to report pending with its payment id:\n${output()}`,
+    );
+  });
+});
+
+test("re-attempting a fulfilled purchase re-serves it instead of delivering twice", async () => {
+  await withMerchant(4083, STUB_ENV, async ({ url, output }) => {
+    // The same purchase paid twice — what a payer does when it never received the first
+    // 200, and what happens when one identifier is reused across two purchases. Both
+    // resolve to one payment, so the merchant must deliver once.
+    const purchaseId = "order_fulfilled_once_0001";
+    const key = randomPrivateKey();
+    for (const label of ["first", "re-attempt"]) {
+      const result = await runClient({
+        PRIVATE_KEY: key,
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        PURCHASE_ID: purchaseId,
+      });
+      assertPaid(result, label);
+    }
+    assert.match(
+      output(),
+      /already fulfilled — re-serving, not a new sale/,
+      `expected the second attempt to be recognised as already fulfilled:\n${output()}`,
+    );
   });
 });
 
@@ -308,28 +353,15 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
       return;
     }
 
-    // Known x402 v1 limitation: when settlement outruns the gateway's synchronous
-    // window (~30s, server-side payment_sync_wait_seconds), the facilitator returns
-    // "async tail is not supported in v1". The payment was submitted; x402 v1 just
-    // can't confirm it synchronously — MPP handles this by polling the gateway, which
-    // x402's hosted facilitator does not expose. Set ALLOW_ASYNC_TAIL=1 to treat a
-    // clean submission-up-to-settlement as a conditional pass (wiring verified).
-    const asyncTail = /async tail is not supported|did not complete synchronously/.test(result.output);
-    if (asyncTail && process.env.ALLOW_ASYNC_TAIL === "1") {
-      console.warn(
-        "real e2e: submission accepted, but settlement exceeded the facilitator's synchronous " +
-          "window (x402 v1 async tail unsupported). Wiring verified up to submission; settlement " +
-          "is completing asynchronously and cannot be confirmed synchronously here.",
-      );
-      return;
-    }
-    if (asyncTail) {
+    // A settlement slower than the gateway's synchronous window is not a failure and is
+    // not a special case here: the client re-attempts the same purchase until it reaches
+    // a terminal outcome. Only exhausting those attempts lands here, and it means the
+    // payment is still in flight rather than lost.
+    if (/still settling after/.test(result.output)) {
       assert.fail(
-        "x402 settlement did not complete within the facilitator's synchronous window (~30s, the " +
-          "gateway's payment_sync_wait_seconds). x402 v1 has no async tail, so this corridor's " +
-          "settlement is too slow for synchronous confirmation. Options: raise the gateway's " +
-          "payment_sync_wait_seconds, use a faster corridor, or set ALLOW_ASYNC_TAIL=1 to accept " +
-          `submission-only verification.\n\nClient output:\n${result.output}`,
+        "the payment was accepted but had not settled after the client's re-attempts. It is not " +
+          "lost: re-run this purchase under the same identifier to collect its outcome " +
+          `(the client printed it).\n\nClient output:\n${result.output}`,
       );
     }
 
