@@ -10,7 +10,7 @@ The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` response.
 2. Reads the payment requirements from the `PAYMENT-REQUIRED` header.
-3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
+3. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the merchant settles. (Against a real merchant the client also sends a one-off `approve(Permit2)` transaction if your allowance is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).)
 4. Retries the request with the signed credential in a `PAYMENT-SIGNATURE` header.
 5. If settlement outruns the gateway's synchronous window, re-attempts the **same purchase** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
 
@@ -20,15 +20,16 @@ Cross-chain settlement can take longer than the gateway holds a connection open 
 
 ```
   attempt 1/20 …
-  still settling (payment pay_…) — 0s elapsed, re-attempting in 5s
+  still settling (payment pay_…) — 31s elapsed, re-attempting in 5s
   attempt 2/20 …
-  settled after 2 attempt(s) in 5s — payment pay_…
+  settled after 2 attempt(s) in 37s — payment pay_…
 Status: 200
 ```
 
 Only the first attempt is slow — it creates the payment; re-attempts return immediately, so the interval paces the wait. Each attempt re-signs from a fresh `402`, since `quote_deadline` is an absolute timestamp and a signed payment goes stale within seconds. What makes them one payment is the **purchase identifier**, carried in x402's [`payment-identifier`](https://github.com/coinbase/x402/blob/main/specs/extensions/payment_identifier.md) extension:
 
 ```ts
+const pay = wrapFetchWithAtumPayment(fetch, client);
 await pay(MERCHANT_URL, {}, { paymentIdentifier: purchaseId });
 ```
 
@@ -43,7 +44,7 @@ order books-123 → payment 1 (books-123-1) → FAILED   ← that identifier is 
                 → payment 2 (books-123-2) → settles  ← the order is paid
 ```
 
-So derive it from both: `` `${order.id}-${order.paymentAttempts}` ``. Reuse it on every attempt at one payment; never across two purchases — the second would resolve onto the first payment, so the payer receives twice and the merchant is paid once. Nothing can detect that, which is why the merchant keys fulfilment on the receipt's `payment_id` (see [`x402-accept-payments`](../x402-accept-payments)).
+So derive it from both — your order id plus a counter you bump for each new payment attempt at that order: `` `${order.id}-${order.paymentAttempts}` ``. Reuse it on every attempt at one payment; never across two purchases — the second would resolve onto the first payment, so the buyer gets the goods twice and the merchant is paid once. Nothing can detect that, which is why the merchant keys fulfilment on the receipt's `payment_id` (see [`x402-accept-payments`](../x402-accept-payments)).
 
 This example pays for one purchase per run, so it generates an identifier per run and prints it. Pass `PURCHASE_ID` **only** to resume a payment interrupted while still settling — never set it in `.env`, or every run would re-attempt the same payment and later runs would be served without paying.
 
@@ -54,7 +55,7 @@ This example is designed to work alongside [`x402-accept-payments`](../x402-acce
 ## Prerequisites
 
 - **Node.js 20+** — includes npm.
-- **A funded testnet wallet** — only for a real (non-stub) settlement: the wallet must hold the source token and have approved Permit2 as a spender. Not needed against the merchant's default stub.
+- **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub.
 - **An npm account granted `@atumlabs` access** — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
 
 ## Quickstart
@@ -81,7 +82,8 @@ Edit `.env`:
 | `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
-| `PURCHASE_ID` | No | Names the purchase being paid for. Each run generates and prints one, so leave it unset — pass it on the command line only to resume a payment interrupted while still settling. See [Retries and idempotency](#retries-and-idempotency). |
+
+> `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
 
 > **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
 
