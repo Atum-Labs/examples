@@ -1,0 +1,57 @@
+# Smoke CI for the Atum examples.
+#
+# Installs each example from its lock file, typechecks it, and runs the stub
+# smoke tests. The stub tests run entirely in-process: no facilitator, no
+# gateway, no testnet, and no funds. The real end-to-end tests are gated behind
+# RUN_REAL_E2E and a funded PRIVATE_KEY and are deliberately not run here.
+#
+# The Node matrix covers every version the examples claim to support.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # Keep every leg running so a version-specific break is visible as such
+      # instead of cancelling the other legs.
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+          cache-dependency-path: '*/package-lock.json'
+
+      # `npm ci` (not `npm install`) so a lock file that has drifted out of sync
+      # with its package.json fails the build instead of being silently rewritten.
+      - name: Install
+        run: npm run ci:all
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN }}
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Smoke tests
+        run: npm test
