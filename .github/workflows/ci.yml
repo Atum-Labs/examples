@@ -5,8 +5,9 @@
 # gateway, no testnet, and no funds. The real end-to-end tests are gated behind
 # RUN_REAL_E2E and a funded PRIVATE_KEY and are deliberately not run here.
 #
-# The Node matrix covers every version the examples claim to support.
-name: CI
+# The matrix covers every Node version the examples claim to support, which also
+# spans both npm majors currently in circulation.
+name: Smoke tests
 
 on:
   pull_request:
@@ -15,7 +16,7 @@ on:
 
 # A newer push to the same branch supersedes an in-flight run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: smoke-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,7 +24,7 @@ permissions:
 
 jobs:
   smoke:
-    name: smoke (node ${{ matrix.node }})
+    name: Node ${{ matrix.node }} (npm ${{ matrix.npm }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -31,12 +32,23 @@ jobs:
       # instead of cancelling the other legs.
       fail-fast: false
       matrix:
-        node: ['20', '22', '24']
+        # `npm` is a label only — it records the npm major that each Node line
+        # bundles, so the check name shows which one a failure came from. It
+        # does not install or pin npm. npm 10 and 11 differ in how strictly they
+        # validate lock files, so the npm major is the axis that actually
+        # matters here; the Node version is how you select it.
+        include:
+          - { node: '20', npm: '10' }
+          - { node: '22', npm: '10' }
+          - { node: '24', npm: '11' }
 
+    # Actions are pinned to full-length commit SHAs, with the release they
+    # correspond to in a trailing comment. Update the SHA and the comment
+    # together when bumping.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
           registry-url: 'https://registry.npmjs.org'
