@@ -493,6 +493,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // See mpp-accept-payments: printed before the slow part of boot so the smoke
+  // tests can tell "still starting" from "died silently".
+  console.log(
+    `x402 merchant starting (${
+      USE_STUB_FACILITATOR
+        ? "stub (local, no funds)"
+        : `real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/defaults`
+    })`,
+  );
   const corridor = await resolveCorridor();
   const requirements = buildRequirements(corridor);
   const app = buildApp(requirements);

@@ -48,7 +48,11 @@ function waitForStdout(
   child: ChildProcessWithoutNullStreams,
   match: string,
   getOutput: () => string,
-  timeoutMs = 15_000,
+  // Boot covers a tsx cold transform of the ~800KB SDK bundle plus, in real mode, a
+  // live gateway /defaults round-trip. Measured ~7s on an unloaded CI runner — half
+  // the old 15s budget — so a loaded one overran it and the suite failed having
+  // settled nothing. Overridable so CI can be generous without slowing local runs.
+  timeoutMs = Number(process.env.MERCHANT_BOOT_TIMEOUT_MS ?? 45_000),
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     // Accumulate before matching: a split write can land "MPP merchant" and
