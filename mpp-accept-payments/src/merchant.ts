@@ -279,6 +279,13 @@ function paymentIdOf(res: http.ServerResponse): string | undefined {
 }
 
 async function main() {
+  // Print BEFORE setup(). The static SDK imports above (~800KB through tsx) and,
+  // in real mode, setup()'s live gateway /defaults call are the slow part of boot,
+  // and until this line nothing was logged until both finished — so a slow boot and
+  // a dead process looked identical to the smoke tests ("merchant output: <empty>").
+  console.log(
+    `MPP merchant starting (${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_URL}`})`,
+  );
   const { corridor, submitter } = await setup();
   const source = corridor.sources[0];
 
