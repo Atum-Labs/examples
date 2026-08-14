@@ -91,20 +91,46 @@ Running it in your own private CI: provide an automation token with read access 
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
 > ```
 >
-> Before the first funded run, approve **Permit2** on each source token you'll spend from — the x402 client aborts without an allowance (unlike the MPP client, which approves for you): `cast send <SOURCE_TOKEN> "approve(address,uint256)" 0x000000000022D473030F116dDEE9F6B43aC78BA3 <amount> --rpc-url <SOURCE_RPC> --private-key "$PRIVATE_KEY"`. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
+> The payer approves **Permit2** for each source token itself (`ensureSourceApproval`), so there is no manual setup step — just make sure the wallet has gas on the source chain. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
-> **x402 settles synchronously.** The x402 facilitator (v1) confirms settlement only within the gateway's synchronous window (~30s, the server-side `payment_sync_wait_seconds`) — it has no async tail. If a corridor settles slower than that window, `/settle` returns `"settlement did not complete synchronously; the async tail is not supported in v1"` and the payment continues settling asynchronously without a synchronous confirmation. (This is the key difference from MPP, whose merchant polls the gateway for the async tail.) In that case the real e2e reports the limitation; set `ALLOW_ASYNC_TAIL=1` to treat a clean submission as a conditional pass (wiring verified up to submission).
+> **A slow corridor needs nothing special.** When settlement outruns the gateway's synchronous window (~30s), the facilitator reports the payment as still settling and the payer re-attempts the same purchase until it has a terminal outcome — so the funded run settles either way. See [Settlement outcomes](#settlement-outcomes).
+
+## Settlement outcomes
+
+Cross-chain settlement can take longer than the gateway holds a connection open (~30s). Rather than hanging on, the facilitator answers with the payment id and the state it is in. x402 models settlement as a boolean, so everything short of settled arrives as `success: false`; `errorReason` separates three cases:
+
+| `errorReason` | What happened | What the payer should do |
+|---|---|---|
+| *(none — `success: true`)* | Settled | Nothing; the resource is served |
+| `settlement_pending` | Accepted, still settling | **Re-attempt the same purchase** — it resolves onto this payment |
+| `settlement_failed` | Terminal failure | **A new payment, under a new identifier** — this one can never settle |
+| a gateway code | Refused; nothing charged | Fix the request and pay the same purchase again |
+
+Pending and failed demand **opposite** actions, so never collapse them into one "payment failed": reading pending as failed abandons a payment that was about to succeed and invites a second charge; reading failed as pending strands the payer retrying a dead payment. A pending payment is not served — goods must not be released against an unfinished payment — and this merchant sets `PAYMENT-RESPONSE` on those responses too, since that is the payer's only channel for `errorReason` and the payment id.
+
+To watch it locally with no funds, start the merchant with `STUB_PENDING_ATTEMPTS=2`:
+
+```
+→ 402: no payment credential, issuing challenge
+→ 402: still settling (payment pay_stub_…) — awaiting the payer's re-attempt
+→ 402: no payment credential, issuing challenge
+→ 200: settled (stub — no funds moved) — payment pay_stub_…
+```
+
+## Idempotency: what this merchant has to do
+
+**Naming the purchase: nothing.** The 402 declares x402's [`payment-identifier`](https://github.com/coinbase/x402/blob/main/specs/extensions/payment_identifier.md) extension as required and the payer names the purchase inside the payment, which this merchant forwards to `/settle` unchanged. Accepting x402 costs your API nothing — no new endpoint, parameter, or header. (To name the purchase yourself from an order id you already hold, add `id` to the declaration in `src/merchant.ts`; a payer may add to your declaration but never overwrite it.)
+
+**Delivering once: your job.** An identifier stops you being *paid* twice, not *delivering* twice: if a payer reuses one across two purchases, the second resolves onto the first payment and the gateway replays its receipt, so a merchant keying delivery on the request ships again. Key it on the receipt's `payment_id` instead — [`src/payments.ts`](src/payments.ts) shows the shape, and in production it is the payments table you already keep for reconciliation. It also makes an honest retry safe: a payer that never received the `200` is served the same result.
 
 ## Going to testnet / mainnet
-
-> **⚠ Cross-chain settlement can be slower than x402 can confirm.** x402 settles **synchronously** — the facilitator only confirms settlement within the gateway's ~30s window. On slow corridors (notably **Base ↔ Tempo**), cross-chain settlement often takes longer, so `/settle` returns `"the async tail is not supported in v1"` and the payment is reported as unconfirmed **even though it may have gone through**. A pending/timeout result here is **not** a confirmed failure — verify on-chain before retrying (a fresh retry is a *second* payment). For a reliably synchronous demo, use a fast corridor; for slow corridors, prefer [MPP](../mpp-accept-payments), whose merchant polls the gateway for the async tail.
 
 The shipped `.env.example` runs the stub. To settle for real against Atum's testnet facilitator, change two values in `.env`:
 
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
 
 The payer funds the payment (source token + gas) — see [`x402-make-payments`](../x402-make-payments). On a successful real settlement the merchant logs the settlement transaction:
 
@@ -112,7 +138,11 @@ The payer funds the payment (source token + gas) — see [`x402-make-payments`](
 Merchant listening on http://localhost:4020
 Facilitator: real https://x402-facilitator.production-testnet.atum.xyz · corridor from https://payment-gw.production-testnet.atum.xyz/defaults
 → 402: no payment credential, issuing challenge
-→ 200: settled (tx 0x…)
+→ 402: still settling (payment pay_…) — awaiting the payer's re-attempt
+→ 402: no payment credential, issuing challenge
+→ 200: settled — payment pay_…
+    source deposit:     https://sepolia.basescan.org/tx/0x…
+    destination payout: https://explore.testnet.tempo.xyz/tx/0x…
 ```
 
 For **mainnet** (where authorized by Atum), the steps are identical — point `FACILITATOR_URL` / `GATEWAY_URL` at production and set the corridor to Atum-authorized mainnet chains and tokens.
@@ -122,11 +152,12 @@ For **mainnet** (where authorized by Atum), the steps are identical — point `F
 ```
 src/
 ├── merchant.ts     # The x402 merchant — gate a route behind payment (stub or real)
+├── payments.ts     # What has been delivered, keyed by payment — so nothing ships twice
 └── smoke.test.ts   # End-to-end check: boots both apps together and verifies a payment succeeds
 ```
 
 ## Further reading
 
-- [x402 Facilitator API reference](https://docs.atumlabs.xyz/api-reference/x402/introduction)
+- [x402 Facilitator API reference](https://docs.atum.xyz/api-reference/x402/introduction)
 - [x402 protocol](https://x402.org)
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)

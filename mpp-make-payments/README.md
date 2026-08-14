@@ -10,14 +10,40 @@ The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` with an `atum-escrow` challenge.
 2. Reads the corridor terms from the challenge.
-3. Signs a Permit2 authorization for the source token (no on-chain transaction — the escrow deposit executes only when the merchant settles).
-4. Retries the request with the signed credential and returns the final `200` response.
+3. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the merchant settles. (Against a real merchant the client also sends a one-off `approve(Permit2)` transaction if your allowance is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).)
+4. Retries the request with the signed credential.
+5. If settlement outruns the gateway's synchronous window, re-attempts the **same purchase** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
 
-## Resilience: safe retries
+## Retries and idempotency
 
-If the paid request fails or times out — for example, if the merchant restarts while your payment is settling — this client automatically retries, up to 3 times, using the **exact same signed credential** rather than a freshly-signed one.
+Cross-chain settlement can take longer than the gateway holds a connection open (~30s). Rather than the merchant hanging on — which is what runs into proxy timeouts — `verify()` reports the payment as still settling, and **re-attempting the same purchase collects the result.** The gateway resolves the re-attempt onto the same payment, so it costs nothing and cannot charge twice. [`src/purchase.ts`](src/purchase.ts) does this:
 
-This matters because a payment is only safe to retry this way: the Atum Payment Gateway recognizes an identical resubmission and returns the original result instead of settling twice, whereas a *newly signed* request would be a distinct, second payment. That's why this example builds the credential once (via `mppx.createCredential`) and reuses it across attempts, rather than relying on a single one-shot request.
+```
+  attempt 1/20 …
+  still settling (payment pay_…) — 31s elapsed, re-attempting in 5s
+  attempt 2/20 …
+  settled after 2 attempt(s) in 37s
+Status: 200
+```
+
+Only the first attempt is slow — it creates the payment; re-attempts return immediately, so the interval paces the wait. Each attempt fetches a fresh `402` and signs a **new** credential: `quote_deadline` is an absolute timestamp, so a signed credential goes stale within seconds and `verify()` refuses it. What makes the attempts one payment is the **purchase identifier**. MPP gives the payer no channel to carry it, so the merchant needs it *before* it can build the challenge — this client therefore puts it in the URL, and the merchant stamps it into the challenge from there:
+
+```
+GET /paid/order_9f3c2a1b7d4e5c6a8b0f
+```
+
+### It names a payment, not an order
+
+A payment that fails terminally spends its identifier for good, so an order that outlives a failed payment needs a new one for the next attempt:
+
+```
+order books-123 → payment 1 (books-123-1) → FAILED   ← that identifier is now dead
+                → payment 2 (books-123-2) → settles  ← the order is paid
+```
+
+So derive it from both — your order id plus a counter you bump for each new payment attempt at that order: `` `${order.id}-${order.paymentAttempts}` ``. Reuse it on every attempt at one payment; never across two purchases — the second would resolve onto the first payment, so the buyer gets the goods twice and the merchant is paid once. Nothing can detect that, which is why the merchant keys fulfilment on the receipt's `payment_id` (see [`mpp-accept-payments`](../mpp-accept-payments)).
+
+This example pays for one purchase per run, so it generates an identifier per run and prints it. Pass `PURCHASE_ID` **only** to resume a payment interrupted while still settling — never set it in `.env`, or every run would re-attempt the same payment and later runs would be served without paying.
 
 ## Pair with mpp-accept-payments
 
@@ -26,7 +52,7 @@ This example is designed to work alongside [`mpp-accept-payments`](../mpp-accept
 ## Prerequisites
 
 - **Node.js 20+** — includes npm.
-- **A funded testnet wallet** — only for a real (non-stub) settlement: the wallet must hold the source token and have approved the source escrow (Permit2). Not needed against the merchant's default stub submitter.
+- **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub submitter.
 - **An npm account granted `@atumlabs` access** — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
 
 ## Quickstart
@@ -51,8 +77,10 @@ Edit `.env`:
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
-| `MERCHANT_URL` | No | URL of the MPP-gated resource. Defaults to `http://localhost:4030/paid`. |
-| `RPC_URL` | No | Source-chain RPC URL (pre-set to Base Sepolia, `https://sepolia.base.org`). When set, the client approves the source token (Permit2) before paying; clear it against the stub merchant. |
+| `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
+| `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
+
+> `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
 
 > **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
 
@@ -65,7 +93,10 @@ npm run pay
 Expected output when paired with the stub merchant:
 
 ```
-Requesting http://localhost:4030/paid …
+Requesting http://localhost:4030/paid/order_986d1b6ed264bde2bacd …
+Purchase order_986d1b6ed264bde2bacd — to re-attempt it: PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
+  attempt 1/20 …
+  settled after 1 attempt(s) in 0s
 Status: 200
 Payment-Receipt header: present
 {
@@ -73,6 +104,8 @@ Payment-Receipt header: present
   "data": "Your premium content here."
 }
 ```
+
+To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`mpp-accept-payments`](../mpp-accept-payments)) — no funds, no gateway.
 
 ## Testing
 
@@ -111,12 +144,12 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 
 ```
 src/
-├── client.ts       # The mppx client — pay for a gated resource in one call
-├── retry.ts        # Retry policy for the paid request (see "Resilience: safe retries" above)
-└── retry.test.ts   # Verifies the retry policy against a server that fails then recovers
+├── client.ts         # The mppx client — names the purchase and pays for the resource
+├── purchase.ts       # Re-attempts the purchase until settlement reaches a terminal outcome
+└── purchase.test.ts  # Verifies pending is retried and a terminal failure is not
 ```
 
 ## Further reading
 
 - [MPP](https://mpp.dev)
-- [Atum documentation](https://docs.atumlabs.xyz)
+- [Atum documentation](https://docs.atum.xyz)

@@ -6,7 +6,9 @@
  */
 
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import express, { Request, Response } from "express";
+import { PaymentLedger } from "./payments.js";
 
 const PORT = Number(process.env.PORT ?? 4020);
 
@@ -122,15 +124,18 @@ interface PaymentRequired {
   x402Version: 2;
   resource: ResourceInfo; // required by the spec — describes the gated resource
   accepts: PaymentRequirements[]; // one entry per payment option offered
+  extensions?: Record<string, unknown>; // see PAYMENT_IDENTIFIER below
   error?: string;
 }
 
 // Decoded from the PAYMENT-SIGNATURE header on the retry. The signed Atum
-// PaymentRequest lives at `payload.paymentRequest`.
+// PaymentRequest lives at `payload.paymentRequest`; `extensions` carries the payer's
+// echo of the purchase identifier, which travels to the facilitator untouched.
 interface PaymentPayload {
   x402Version: 2;
   accepted: PaymentRequirements;
   payload: { paymentRequest: unknown };
+  extensions?: Record<string, unknown>;
   resource?: ResourceInfo;
 }
 
@@ -151,9 +156,72 @@ interface SettleResponse {
   transaction: string;
   network: string;
   payer?: string;
+  /** Machine-readable outcome when `success` is false — see SETTLEMENT_* below. */
   errorReason?: string;
+  errorMessage?: string;
+  /** The Atum payment this outcome belongs to. Absent only when nothing was accepted. */
+  extensions?: { atum?: { paymentId?: string; state?: string; statusUrl?: string } };
   fulfillmentConfirmation?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Naming the purchase — the x402 `payment-identifier` extension.
+//
+// Every retry re-fetches the resource and gets a fresh 402, so nothing about the rebuilt
+// payment is byte-identical to the last attempt. The identifier the payer gives the
+// purchase is what stays fixed: the payer's client derives the payment's `request_id`
+// from it and Atum de-duplicates on that, so a re-attempt resolves to the ORIGINAL
+// payment instead of taking a second one.
+//
+// This merchant declares that an identifier is required and never sees the value — the
+// payer names the purchase inside the payment. Accepting x402 therefore costs your API
+// nothing: no new endpoint, parameter, or header. To name the purchase yourself instead
+// (you already have an order id), add `id: <your order id>` to `info` below; it must be
+// 16-128 chars of letters, digits, hyphen or underscore, and a payer may add to your
+// declaration but never overwrite it.
+//
+// The extension is part of the x402 specification, not an Atum addition:
+// https://github.com/coinbase/x402/blob/main/specs/extensions/payment_identifier.md
+// ---------------------------------------------------------------------------
+
+const PAYMENT_IDENTIFIER = "payment-identifier";
+
+// The schema travels with the declaration so a payer can validate what it is being asked
+// for without knowing this scheme.
+const PAYMENT_IDENTIFIER_DECLARATION = {
+  info: { required: true },
+  schema: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    properties: {
+      required: { type: "boolean" },
+      id: { type: "string", minLength: 16, maxLength: 128, pattern: "^[a-zA-Z0-9_-]+$" },
+    },
+    required: ["required"],
+  },
+} as const;
+
+/** The purchase a payment names, read from either side's `extensions` map. */
+function paymentIdentifierOf(extensions: Record<string, unknown> | undefined): string | undefined {
+  const entry = extensions?.[PAYMENT_IDENTIFIER] as { info?: { id?: unknown } } | undefined;
+  return typeof entry?.info?.id === "string" ? entry.info.id : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Settlement outcomes.
+//
+// x402 models settlement as a boolean, so everything short of settled arrives as
+// `success: false`. Three situations hide behind that flag, and `errorReason` separates
+// them — pending and failed call for OPPOSITE actions, so never collapse them into one
+// "payment failed":
+//
+//   settlement_pending  accepted, still settling  -> re-attempt the SAME purchase
+//   settlement_failed   terminal                  -> a fresh attempt needs a NEW identifier
+//   a gateway code      refused, nothing charged  -> fix the request, pay the same purchase
+// ---------------------------------------------------------------------------
+
+const SETTLEMENT_PENDING = "settlement_pending";
+const SETTLEMENT_FAILED = "settlement_failed";
 
 // ---------------------------------------------------------------------------
 // Corridor contract addresses.
@@ -256,21 +324,60 @@ interface Facilitator {
   settle(body: FacilitatorRequest): Promise<SettleResponse>;
 }
 
+// How many attempts at a purchase the stub reports as still settling before it settles.
+// The default of 0 settles on the first attempt. Set it to 2 or 3 to watch the retry that
+// resolves a slow cross-chain settlement, with no facilitator, no gateway, and no funds:
+//
+//   STUB_PENDING_ATTEMPTS=2 npm run dev
+//
+// This is a demo knob for the stub only. Nothing on the real path reads it.
+const STUB_PENDING_ATTEMPTS = Number(process.env.STUB_PENDING_ATTEMPTS ?? "0");
+
+// A stable fake payment id per purchase, so a retried purchase reports the SAME payment
+// across attempts — exactly as the gateway does when it resolves a retry onto the
+// original payment.
+function stubPaymentId(purchase: string): string {
+  return `pay_stub_${createHash("sha256").update(purchase).digest("hex").slice(0, 32)}`;
+}
+
 // Local stub: approves and "settles" without a facilitator, gateway, or chain.
-const stubFacilitator: Facilitator = {
-  async verify() {
-    return { isValid: true, payer: "0x0000000000000000000000000000000000000000" };
-  },
-  async settle() {
-    return {
-      success: true,
-      transaction: `0x${"11".repeat(32)}`,
-      network: SOURCE_NETWORK,
-      payer: "0x0000000000000000000000000000000000000000",
-      fulfillmentConfirmation: { stub: true, note: "stub settlement — no funds were moved" },
-    };
-  },
-};
+function stubFacilitator(): Facilitator {
+  const attemptsByPurchase = new Map<string, number>();
+  return {
+    async verify() {
+      return { isValid: true, payer: "0x0000000000000000000000000000000000000000" };
+    },
+    async settle(body) {
+      const purchase = paymentIdentifierOf(body.paymentPayload.extensions) ?? "(unnamed)";
+      const paymentId = stubPaymentId(purchase);
+      const attempt = (attemptsByPurchase.get(purchase) ?? 0) + 1;
+      attemptsByPurchase.set(purchase, attempt);
+
+      if (attempt <= STUB_PENDING_ATTEMPTS) {
+        return {
+          success: false,
+          transaction: "",
+          network: SOURCE_NETWORK,
+          payer: "0x0000000000000000000000000000000000000000",
+          errorReason: SETTLEMENT_PENDING,
+          errorMessage:
+            "the payment was accepted and is still settling; re-attempt the purchase under " +
+            "the SAME identifier to collect the result",
+          extensions: { atum: { paymentId, state: "pending" } },
+        };
+      }
+
+      return {
+        success: true,
+        transaction: `0x${"11".repeat(32)}`,
+        network: SOURCE_NETWORK,
+        payer: "0x0000000000000000000000000000000000000000",
+        extensions: { atum: { paymentId, state: "completed" } },
+        fulfillmentConfirmation: { stub: true, note: "stub settlement — no funds were moved" },
+      };
+    },
+  };
+}
 
 // Real facilitator: JSON over HTTP (unaffected by the x402 wire headers).
 const httpFacilitator: Facilitator = {
@@ -294,12 +401,7 @@ const httpFacilitator: Facilitator = {
   },
 };
 
-const facilitator: Facilitator = USE_STUB_FACILITATOR ? stubFacilitator : httpFacilitator;
-
-// The x402 v1 facilitator returns this when cross-chain settlement outruns the
-// gateway's synchronous window (~30s). It means "submitted, still settling
-// asynchronously" — NOT a failed payment. See the async-tail handling below.
-const ASYNC_TAIL_RE = /async tail is not supported|did not complete synchronously/i;
+const facilitator: Facilitator = USE_STUB_FACILITATOR ? stubFacilitator() : httpFacilitator;
 
 // ---------------------------------------------------------------------------
 // Settlement logging — print clickable explorer links instead of bare hashes,
@@ -339,9 +441,15 @@ function logSettlement(settled: SettleResponse): void {
 // Server
 // ---------------------------------------------------------------------------
 
+// What this merchant sells. Recorded against the payment that funded it, so the same
+// payment is never delivered against twice.
+const RESOURCE_BODY = { message: "Access granted.", data: "Your premium content here." };
+
 function buildApp(requirements: PaymentRequirements): express.Express {
   const app = express();
   app.use(express.json());
+
+  const ledger = new PaymentLedger<typeof RESOURCE_BODY>();
 
   app.get("/paid", async (req: Request, res: Response) => {
     // Express lower-cases header names. Read the v2 header, then fall back to v1.
@@ -353,13 +461,19 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       description: "Example premium resource",
     };
 
+    // Every 402 this merchant issues asks the payer to name the purchase, so a payer that
+    // knows nothing else about this scheme still learns an identifier is mandatory.
+    const challengeOf = (error?: string): PaymentRequired => ({
+      x402Version: 2,
+      resource,
+      accepts: [requirements],
+      extensions: { [PAYMENT_IDENTIFIER]: PAYMENT_IDENTIFIER_DECLARATION },
+      ...(error !== undefined ? { error } : {}),
+    });
+
     // No payment credential — issue the 402 challenge with what we accept.
     if (!paymentHeader) {
-      const challenge: PaymentRequired = {
-        x402Version: 2,
-        resource,
-        accepts: [requirements],
-      };
+      const challenge = challengeOf();
       console.log("→ 402: no payment credential, issuing challenge");
       res
         .status(402)
@@ -397,12 +511,7 @@ function buildApp(requirements: PaymentRequirements): express.Express {
     }
 
     if (!verified.isValid) {
-      const challenge: PaymentRequired = {
-        x402Version: 2,
-        resource,
-        accepts: [requirements],
-        error: verified.invalidReason ?? "Payment credential is not valid.",
-      };
+      const challenge = challengeOf(verified.invalidReason ?? "Payment credential is not valid.");
       console.log(`→ 402: verify rejected (${challenge.error})`);
       res
         .status(402)
@@ -422,44 +531,32 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       return;
     }
 
+    // The payer reads `errorReason` and the payment id off PAYMENT-RESPONSE to decide
+    // whether to re-attempt, so it is set on unsettled outcomes too — not only on the 200.
+    res.setHeader(HEADER_PAYMENT_RESPONSE, encodeHeader(settled));
+    const paymentId = settled.extensions?.atum?.paymentId;
+
     if (!settled.success) {
       const reason = settled.errorReason ?? "Settlement failed.";
+      const pending = reason === SETTLEMENT_PENDING;
 
-      // Async tail: the payment was submitted and is settling asynchronously — it did
-      // NOT fail. x402 v1 just can't confirm a settlement that outruns the gateway's
-      // synchronous window. Do not present this as a failure; flag it as pending and
-      // steer operators away from slow cross-chain corridors.
-      if (ASYNC_TAIL_RE.test(reason)) {
-        console.warn(
-          `⚠ settlement pending (NOT failed): the payment was submitted but cross-chain settlement ` +
-            `outran the facilitator's ~30s synchronous window, so x402 v1 cannot confirm it here. ` +
-            `It may still complete. Prefer faster corridors, or verify settlement on-chain / via the gateway.`,
-        );
-        const pending: PaymentRequired = {
-          x402Version: 2,
-          resource,
-          accepts: [requirements],
-          error:
-            "Settlement is still in progress (submitted, not yet confirmed). This is NOT a failure: " +
-            "x402 cannot confirm a settlement that outruns the facilitator's synchronous window, and " +
-            "the payment may still complete. Avoid slow cross-chain corridors. " +
-            `(facilitator: ${reason})`,
-        };
-        console.log(`→ 402: settlement pending (async, not confirmed) — see warning above`);
-        res
-          .status(402)
-          .set(HEADER_PAYMENT_REQUIRED, encodeHeader(pending))
-          .json(pending);
-        return;
-      }
+      // Pending is not a failure — funds may already be moving — but the resource is
+      // still withheld: goods must not be released against an unfinished payment.
+      const error = pending
+        ? `Settlement is still in progress (payment ${paymentId}). Re-attempt this purchase ` +
+          `under the same identifier to collect the result; it resolves onto this payment ` +
+          `and costs nothing. Do not pay again under a new identifier.`
+        : reason === SETTLEMENT_FAILED
+          ? `Settlement failed terminally (payment ${paymentId}). This purchase's identifier ` +
+            `now resolves to a dead payment, so a fresh attempt needs a NEW identifier.`
+          : `The payment was refused and nothing was charged: ${settled.errorMessage ?? reason}`;
 
-      const challenge: PaymentRequired = {
-        x402Version: 2,
-        resource,
-        accepts: [requirements],
-        error: reason,
-      };
-      console.log(`→ 402: settle failed (${reason})`);
+      const challenge = challengeOf(error);
+      console.log(
+        pending
+          ? `→ 402: still settling (payment ${paymentId}) — awaiting the payer's re-attempt`
+          : `→ 402: not settled (${reason})`,
+      );
       res
         .status(402)
         .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
@@ -467,15 +564,26 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       return;
     }
 
-    // Payment confirmed — attach the settlement receipt and return the resource.
+    // Settled. Deliver against the PAYMENT, not against the request: a payer that reused
+    // one identifier for two purchases arrives here twice with the same payment id, and
+    // must be served the first delivery rather than a second one. See ./payments.ts.
+    if (paymentId) {
+      const already = ledger.served(paymentId);
+      if (already) {
+        console.log(`→ 200: payment ${paymentId} was already fulfilled — re-serving, not a new sale`);
+        res.json(already.result);
+        return;
+      }
+      ledger.record(paymentId, RESOURCE_BODY);
+    }
+
     console.log(
       USE_STUB_FACILITATOR
-        ? "→ 200: settled (stub — no funds moved)"
-        : "→ 200: settled",
+        ? `→ 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}`
+        : `→ 200: settled${paymentId ? ` — payment ${paymentId}` : ""}`,
     );
     logSettlement(settled);
-    res.setHeader(HEADER_PAYMENT_RESPONSE, encodeHeader(settled));
-    res.json({ message: "Access granted.", data: "Your premium content here." });
+    res.json(RESOURCE_BODY);
   });
 
   return app;
@@ -493,6 +601,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // See mpp-accept-payments: printed before the slow part of boot so the smoke
+  // tests can tell "still starting" from "died silently".
+  console.log(
+    `x402 merchant starting (${
+      USE_STUB_FACILITATOR
+        ? "stub (local, no funds)"
+        : `real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/defaults`
+    })`,
+  );
   const corridor = await resolveCorridor();
   const requirements = buildRequirements(corridor);
   const app = buildApp(requirements);

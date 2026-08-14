@@ -6,76 +6,88 @@
  */
 
 import "dotenv/config";
+import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
-import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
-import { registerAtumEscrowScheme } from "@atumlabs/x402-atum-escrow/client";
+import { x402Client } from "@x402/fetch";
+import { registerAtumEscrowScheme, ensureSourceApproval } from "@atumlabs/x402-atum-escrow/client";
+import { wrapFetchWithAtumPayment } from "@atumlabs/x402-atum-escrow/fetch";
+import { payPurchase } from "./purchase.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, REQUEST_ID } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID } = process.env;
 
 if (!PRIVATE_KEY) {
   console.error("Error: PRIVATE_KEY is required in .env");
   process.exit(1);
 }
 
+// Names the purchase this run is paying for. The client derives the payment's identity
+// from it, so Atum resolves a re-attempt onto the original payment instead of taking a
+// second one.
+//
+// This identifies ONE PAYMENT, not an order. An order can outlive several payments: if a
+// payment fails terminally its identifier is spent for good, and charging for the same
+// goods again means a new identifier. So a real merchant derives this from both — e.g.
+// `${order.id}-${order.paymentAttempts}` → "books-123-2". See the README.
+//
+// A fresh id per run is the safe default: each run is a new payment. Set PURCHASE_ID to
+// resume one that was interrupted while it was still settling:
+//
+//   PURCHASE_ID=<the id printed below> npm run pay
+//
+// Don't put PURCHASE_ID in .env: a value left set there would make every run re-attempt
+// the same payment, and later runs would be served without paying.
+const purchaseId = PURCHASE_ID || `order_${randomBytes(10).toString("hex")}`;
+
 const wallet = new ethers.Wallet(PRIVATE_KEY);
 const client = new x402Client();
+registerAtumEscrowScheme(client, { signer: wallet });
 
-// REQUEST_ID is the payment's idempotency key. The payer derives the single-use escrow
-// deposit nonce from (REQUEST_ID, payer address), so rebuilding the SAME payment with the
-// SAME REQUEST_ID reproduces the SAME nonce — a retry is then deduped on-chain and by the
-// Atum gateway instead of charging a second time. To stay safe:
-//   • set REQUEST_ID to a stable, per-payment value (e.g. your order/invoice id);
-//   • REUSE the exact same value when retrying THIS payment;
-//   • use a DIFFERENT value for every distinct payment — a reused id across two different
-//     payments would make the second one dedupe into the first and be rejected.
-// When REQUEST_ID is unset, the SDK generates a random id per run: fine for a one-shot demo,
-// but NOT retry-safe (a re-run would sign a fresh nonce and could double-pay). See the
-// "Avoiding double payments" section of the README.
-registerAtumEscrowScheme(client, { signer: wallet, requestId: REQUEST_ID });
-
-// Optional: preflight Permit2 allowance before signing so a missing
-// approve() fails fast here instead of reverting on-chain at settle.
+// Optional: when RPC_URL is set, approve the source token (Permit2) before signing so the
+// escrow deposit does not revert at settlement. The token, chain, and exact amount come
+// from the 402, and this handler is awaited before the payment is built. `ensureSourceApproval`
+// reads the current allowance and only sends a transaction if it falls short, so it is a
+// no-op once approved. Leave RPC_URL unset against the stub merchant — there is no real
+// chain to approve on.
+//
+// Worth getting right up front: a deposit that reverts on-chain is a *terminal* settlement
+// failure, and a terminal failure spends that purchase identifier for good.
 if (RPC_URL) {
-  const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const signer = new ethers.Wallet(PRIVATE_KEY, new ethers.JsonRpcProvider(RPC_URL));
   const owner = await wallet.getAddress();
 
   client.onBeforePaymentCreation(async ({ selectedRequirements }) => {
-    const erc20 = new ethers.Contract(
-      selectedRequirements.asset,
-      ["function allowance(address,address) view returns (uint256)"],
-      provider,
+    const result = await ensureSourceApproval({
+      network: selectedRequirements.network,
+      token: selectedRequirements.asset,
+      owner,
+      signer,
+      requiredAllowance: BigInt(selectedRequirements.amount),
+    });
+    console.log(
+      result.alreadySufficient
+        ? "Source token already approved."
+        : `Approved source token (tx ${result.txHash}).`,
     );
-    const allowance = (await erc20.allowance(owner, PERMIT2)) as bigint;
-    if (allowance < BigInt(selectedRequirements.amount)) {
-      return {
-        abort: true,
-        reason: `Insufficient Permit2 allowance on ${selectedRequirements.asset}. Run approve(Permit2) on your source token first.`,
-      };
-    }
   });
 }
 
-const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+// The client is built once and reused; the purchase is named per call, so one client can
+// pay for any number of distinct purchases without their identities colliding.
+const pay = wrapFetchWithAtumPayment(fetch, client);
 
 console.log(`Requesting ${MERCHANT_URL} …`);
-const response = await fetchWithPayment(MERCHANT_URL);
-const body = await response.json().catch(() => response.text());
+console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
 
-console.log(`Status: ${response.status}`);
-console.log(JSON.stringify(body, null, 2));
+try {
+  // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
+  // the gateway's ~30s synchronous window; the re-attempt is what collects the outcome.
+  const response = await payPurchase(() => pay(MERCHANT_URL, {}, { paymentIdentifier: purchaseId }));
+  const body = await response.json().catch(() => response.text());
 
-// A 402 whose error is the x402 v1 "async tail" is NOT a settlement failure: the
-// payment was submitted and is settling asynchronously, but cross-chain settlement
-// outran the facilitator's synchronous window (~30s), so x402 can't confirm it here.
-// Frame it as pending, not failed, and steer away from slow corridors.
-const errorText =
-  body && typeof body === "object" && "error" in body ? String((body as { error?: unknown }).error) : "";
-if (response.status === 402 && /async tail is not supported|did not complete synchronously/i.test(errorText)) {
-  console.warn(
-    "\n⚠  Settlement pending — NOT a failure.\n" +
-      "   The payment was submitted, but cross-chain settlement is taking longer than x402's\n" +
-      "   synchronous window (~30s), so the facilitator can't confirm it here. It may still\n" +
-      "   complete. Prefer faster corridors, or verify settlement on-chain / via the gateway.",
-  );
+  console.log(`Status: ${response.status}`);
+  console.log(JSON.stringify(body, null, 2));
+  if (!response.ok) process.exit(1);
+} catch (err) {
+  console.error(`Purchase ${purchaseId} did not complete: ${(err as Error).message}`);
+  process.exit(1);
 }

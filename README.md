@@ -7,7 +7,7 @@ Proprietary reference implementations for approved developers building applicati
 This repo is the fastest way to see an Atum payment work end-to-end — and during early access it's the **source of truth**: where anything else (the docs, an SDK default, an older guide) disagrees with these examples, follow the examples. They're pinned to the environment and corridor we actively test.
 
 - **New here?** Start in stub mode (no funds), then move to real settlement — see [Environments](#environments) below. The path we've hardened for this preview is [Base Sepolia ↔ Tempo](#hosted-testnet-production-testnet); other chains exist in the platform, but this corridor is the most predictable to test here.
-- **`production-testnet` is real but still hardening.** Expect the occasional slow corridor or timeout, and treat a timeout as *pending, not failed*: [verify settlement on-chain](docs/settlement-proof.md) before retrying, so you never pay twice.
+- **`production-testnet` is real but still hardening.** Expect the occasional slow corridor. A settlement that outruns the gateway's ~30s synchronous window is not a failure — the payer re-attempts the same purchase and collects the outcome, and cannot be charged twice for it.
 - **Hit a bump?** Email [support@atumlabs.xyz](mailto:support@atumlabs.xyz) and tell us the specific friction you ran into.
 
 ## Environments
@@ -33,11 +33,11 @@ Set the stub flag to `false` to settle for real over Atum's hosted testnet. The 
 | Payment Gateway (MPP settlement + x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://x402-facilitator.production-testnet.atum.xyz` |
 
-Atum supports many corridors ([supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded and have approved the source token (Permit2). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor).
+Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded on the chain it spends from (the payers handle the Permit2 approval themselves). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor).
 
 > **`production-testnet` is a testnet, and it is not yet hardened.**
 >
-> Expect occasional slow corridors: a timed-out result is not necessarily a confirmed failure. Treat it as *pending, not failed*, and retry only with the **identical** credential (a new one is a second payment). MPP confirms by polling the gateway to a terminal state; x402 v1 has no async tail, so reconcile on-chain before assuming failure.
+> Expect occasional slow corridors. When settlement outruns the gateway's ~30s synchronous window the merchant reports the payment as still settling rather than holding the connection open, and the payer re-attempts the **same purchase** until it reaches a terminal outcome. The re-attempt resolves onto the original payment, so it costs nothing and cannot charge twice. Both protocols work this way.
 
 ### Mainnet
 
@@ -51,6 +51,7 @@ Each example is a standalone project with its own tests, but the repo root has a
 | --- | --- | --- |
 | `npm run install:all` | `npm install` in all four apps | — |
 | `npm test` | Smoke tests for all four apps (alias for `test:smoke`) | None |
+| `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt path | None |
 | `npm run test:e2e` | Real, funded settlement for both protocols, **both directions** of the shipped corridor | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
 | `npm run typecheck` | `tsc --noEmit` across all four apps | — |
@@ -82,7 +83,7 @@ Settles real payments over the hosted testnet, for both protocols and in **both 
 cast rpc tempo_fundAddress 0xYourWallet --rpc-url https://rpc.moderato.tempo.xyz   # mints 1M pathUSD
 ```
 
-**2. Approve Permit2 (one-time).** Real settlement pulls your funds through Permit2, so each source token needs a one-time `approve(Permit2)` per chain. `mpp-make-payments` does this for you (`ensureSourceApproval`); `x402-make-payments` does **not** — it preflights the allowance and aborts if it's missing. For the exact `cast` commands (Base Sepolia USDC and Tempo pathUSD), see [`x402-make-payments` → Going to testnet / mainnet](x402-make-payments/README.md#going-to-testnet--mainnet).
+**2. Approve Permit2 — handled for you.** Real settlement pulls your funds through Permit2, so each source token needs an `approve(Permit2)` per chain. Both payers do this themselves via `ensureSourceApproval` when `RPC_URL` is set: they read the current allowance and send an approval only if it falls short, so it happens once and is a no-op thereafter. The wallet just needs gas on the source chain.
 
 **3. Export your key and receiving address.**
 
@@ -99,9 +100,9 @@ npm run test:e2e
 
 Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises both sides (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (typically 25–40s per leg) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. See the [settlement proof](docs/settlement-proof.md) to verify the result on-chain.
 
-**Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). On slow corridors (like Base ↔ Tempo), x402 settlement can outrun the facilitator's ~30s synchronous window; that surfaces as a *pending, not failed* result, and the x402 e2e fails by design to flag it — set `ALLOW_ASYNC_TAIL=1` to accept submission-only verification for those legs (MPP polls to a terminal state, so it doesn't need this). Other overrides: `FACILITATOR_URL`, `GATEWAY_URL`, and the per-direction source RPCs `RPC_URL` / `REVERSE_RPC_URL` (default to the shipped corridor's chains). To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs; `SKIP_REVERSE=1` to skip the reverse leg).
+**Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). A slow corridor needs no special handling — the payer re-attempts the purchase until it settles. Other overrides: `FACILITATOR_URL`, `GATEWAY_URL`, and the per-direction source RPCs `RPC_URL` / `REVERSE_RPC_URL` (default to the shipped corridor's chains). To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs; `SKIP_REVERSE=1` to skip the reverse leg).
 
-> **Other corridors:** Base ↔ Tempo is what these examples are hardened against and wired to out of the box; the commands above use it for concreteness. Atum supports [other corridors](https://docs.atumlabs.xyz/get-started/reference/supported-assets) — to exercise one, repoint each app's `.env` (`SOURCE_*`/`DEST_*` and the source RPCs); see [`settlement-proof.md`](docs/settlement-proof.md).
+> **Other corridors:** Base ↔ Tempo is what these examples are hardened against and wired to out of the box; the commands above use it for concreteness. Atum supports [other corridors](https://docs.atum.xyz/get-started/reference/supported-assets) — to exercise one, repoint each app's `.env` (`SOURCE_*`/`DEST_*` and the source RPCs); see [`settlement-proof.md`](docs/settlement-proof.md).
 
 ## Evaluating settlement
 

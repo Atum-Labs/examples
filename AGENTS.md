@@ -2,7 +2,7 @@
 
 Proprietary Atum reference examples for accepting and making payments over **x402** and **MPP**. Not open source — see [`LICENSE`](./LICENSE).
 
-**Tested corridor:** Atum supports many corridors ([supported assets](https://docs.atumlabs.xyz/get-started/reference/supported-assets)); the corridor these examples are hardened against is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. The [root README](./README.md) is the source of truth for that hardened corridor and its status; each app's `.env.example` holds the exact chains, assets, and addresses it's wired to. Other supported corridors work but aren't hardened here — prefer the hardened one for anything you need to rely on.
+**Tested corridor:** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the corridor these examples are hardened against is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. The [root README](./README.md) is the source of truth for that hardened corridor and its status; each app's `.env.example` holds the exact chains, assets, and addresses it's wired to. Other supported corridors work but aren't hardened here — prefer the hardened one for anything you need to rely on.
 
 ## Layout
 
@@ -28,10 +28,12 @@ Each app is a standalone npm package (no workspaces). The repo root has a thin o
 
 ## Domain gotchas (agents get these wrong)
 
-- **Never rebuild a signed credential to retry.** Resend the *identical* bytes — settlement is idempotent on identical credentials; a new credential is a second payment. See `mpp-make-payments/src/retry.ts`.
-- **x402 v1 has no async tail.** On slow corridors (notably Base ↔ Tempo), settlement can outrun the facilitator's ~30s synchronous window; `/settle` then returns `"async tail is not supported in v1"`. Treat that as **pending, not failed** — verify on-chain before retrying. **MPP settles at comparable speed but additionally survives the async tail** (its merchant polls the gateway to a terminal state), so prefer it when a corridor may settle slower than the sync window.
+- **Retry by re-attempting the purchase, not by replaying bytes.** Deadlines are absolute timestamps, so a signed payment goes stale within seconds. Fetch a fresh 402, re-sign, and keep the same purchase identifier — that is what makes the attempts one payment. See `*/src/purchase.ts`.
+- **Never poll for settlement, and never hold a request open for it.** When settlement outruns the gateway's ~30s synchronous window, the merchant reports the payment as still settling and the payer's re-attempt collects the outcome. Both protocols behave identically here.
+- **Pending and failed need opposite actions.** Pending → re-attempt the same purchase. Terminal failure → that identifier is spent for good; the same goods need a NEW purchase id. Never collapse them into "payment failed".
+- **Key fulfilment on the receipt's `payment_id`, never on the request.** An identifier stops you being paid twice, not delivering twice. See `*/src/payments.ts`.
 - **Real settlement is opt-in and moves real testnet funds:** `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP), or `RUN_REAL_E2E=1 PRIVATE_KEY=… DEST_ADDRESS=… npm test`. Startup guards refuse the placeholder MPP secret and an invalid `DEST_ADDRESS` in real mode — keep those guards intact.
-- **Real settlement needs a one-time `approve(Permit2)` per source token/chain** — `x402-make` aborts without it, `mpp-make` auto-approves; see the root README's "One-time setup — approve Permit2."
+- **Real settlement needs an `approve(Permit2)` per source token/chain** — both payers handle it via `ensureSourceApproval` when `RPC_URL` is set, so there is no manual step. Do not reintroduce one.
 - Corridor contract addresses come from the gateway's `GET /defaults` at startup — do not hardcode them.
 
 ## Conventions
