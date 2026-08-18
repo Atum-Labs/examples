@@ -340,10 +340,10 @@ interface Direction {
 
 const FORWARD: Direction = {
   label: "Base Sepolia → Tempo (Moderato)",
-  sourceNetwork: "eip155:84532",
-  sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  destNetwork: "eip155:42431",
-  destAsset: "0x20c0000000000000000000000000000000000000",
+  sourceNetwork: process.env.SOURCE_NETWORK ?? "eip155:84532",
+  sourceAsset: process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  destNetwork: process.env.DEST_NETWORK ?? "eip155:42431",
+  destAsset: process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000",
   rpcUrl: process.env.RPC_URL ?? "https://sepolia.base.org",
 };
 
@@ -353,10 +353,10 @@ const FORWARD: Direction = {
 // Runs by default in a funded run; set SKIP_REVERSE=1 to skip it.
 const REVERSE: Direction = {
   label: "Tempo (Moderato) → Base Sepolia",
-  sourceNetwork: "eip155:42431",
-  sourceAsset: "0x20c0000000000000000000000000000000000000",
-  destNetwork: "eip155:84532",
-  destAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  sourceNetwork: process.env.DEST_NETWORK ?? "eip155:42431",
+  sourceAsset: process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000",
+  destNetwork: process.env.SOURCE_NETWORK ?? "eip155:84532",
+  destAsset: process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   rpcUrl: process.env.REVERSE_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
 };
 
