@@ -76,7 +76,9 @@ This boots the merchant (in stub mode) and drives real payments against it using
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
 > ```
 >
-> It asserts a real on-chain Base → Tempo settlement (a hex payment id plus source-deposit and destination-payout tx links) and fails if it detects the stub, so it can never give a false pass. A fresh `MPP_SECRET_KEY` is generated per run; optional overrides: `GATEWAY_URL`, `RPC_URL` (defaults to Base Sepolia), `FULFILLMENT_DEADLINE_SECONDS`. When settlement outruns the gateway's synchronous window the merchant answers "still settling" and the payer re-attempts the same purchase, so a slow corridor still resolves to a confirmed result. For the full walkthrough and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
+> It asserts a real on-chain Base → Tempo settlement (a hex payment id plus source-deposit and destination-payout tx links) and fails if it detects the stub, so it can never give a false pass. A fresh `MPP_SECRET_KEY` is generated per run; optional overrides: `GATEWAY_URL`, `FULFILLMENT_DEADLINE_SECONDS`, and each leg's source-chain RPC (`RPC_URL`, defaults to Base Sepolia; `REVERSE_RPC_URL`, defaults to Tempo Moderato). When settlement outruns the gateway's synchronous window the merchant answers "still settling" and the payer re-attempts the same purchase, so a slow corridor still resolves to a confirmed result. For the full walkthrough and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
+>
+> **To settle a different corridor,** set `SOURCE_NETWORK` / `SOURCE_ASSET` / `DEST_NETWORK` / `DEST_ASSET` and the RPCs above in your **shell**, not in `.env`. `.env` configures the merchant you start by hand with `npm run dev` (see [Going to testnet / mainnet](#going-to-testnet--mainnet)); this test suite does not read it, so a leftover `.env` cannot change what it settles. Each leg prints its corridor before funds move.
 
 ## Settlement outcomes
 
@@ -123,6 +125,11 @@ The shipped `.env.example` is already wired for a live **testnet** corridor — 
 3. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
 The corridor (`SOURCE_*` = Base Sepolia USDC, `DEST_*` = Tempo pathUSD), the amount (`FULFILLMENT_AMOUNT=50000`, i.e. `0.05`), and the markup/deadlines are already set — adjust them for a different corridor. The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
+
+Two things to know when changing the corridor here:
+
+- `FULFILLMENT_AMOUNT` is in **atomic units for a 6-decimal token** and does not rescale itself, so a destination asset with different decimals needs a new value.
+- This `.env` corridor applies to the merchant you start with `npm run dev`. To repoint the **test suite**, export the same variables instead — see [Testing](#testing).
 
 The payer funds the payment (source token + Base Sepolia gas) — see the [`mpp-make-payments`](../mpp-make-payments) example. Once both are running, a successful real settlement logs the source (Base) and destination (Tempo) transaction links (your ids and hashes will differ):
 

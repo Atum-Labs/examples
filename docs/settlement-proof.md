@@ -6,7 +6,7 @@ The question it answers is: **is settlement over these protocols real, verifiabl
 
 > **Proprietary reference material.** See the [root README](../README.md) and [`LICENSE`](../LICENSE). Chains, assets, corridors, gateway, and facilitator shown here are illustrative and require separate Atum authorization.
 
-> **Corridor.** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples are **tested and hardened** against — and wired to out of the box — is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. See the [root README](../README.md) for its hardening status, and each app's `.env.example` for the exact chains, assets, and addresses. The proof method below is corridor-agnostic — the commands just use the hardened corridor for concreteness; to prove another supported corridor, point the examples at it and substitute the source/destination chains, assets, and block explorers.
+> **Corridor.** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples are **tested and hardened** against — and wired to out of the box — is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. See the [root README](../README.md) for its hardening status, and each app's `.env.example` for the exact chains, assets, and addresses. The proof method below is corridor-agnostic — the commands just use the hardened corridor for concreteness. To prove another supported corridor, export `SOURCE_NETWORK`/`SOURCE_ASSET`/`DEST_NETWORK`/`DEST_ASSET` plus each leg's source RPC (see [x402](#x402) below), and substitute the block explorers.
 
 ## What these examples prove 
 
@@ -100,7 +100,9 @@ RUN_REAL_E2E=1 \
   npm test
 ```
 
-The merchant logs `→ 200: settled`, followed by the settlement transaction link(s). If the corridor settles slower than the gateway's synchronous window, the payer re-attempts the purchase until it does — the run takes longer, and the outcome is the same. Optional overrides: `RPC_URL` (default `https://sepolia.base.org`), `FACILITATOR_URL`, `GATEWAY_URL`.
+The merchant logs `→ 200: settled`, followed by the settlement transaction link(s). If the corridor settles slower than the gateway's synchronous window, the payer re-attempts the purchase until it does — the run takes longer, and the outcome is the same.
+
+Optional overrides for both protocols' funded runs: `FACILITATOR_URL`, `GATEWAY_URL`, the corridor (`SOURCE_NETWORK`, `SOURCE_ASSET`, `DEST_NETWORK`, `DEST_ASSET`), and each leg's source-chain RPC (`RPC_URL`, default `https://sepolia.base.org`; `REVERSE_RPC_URL`, default `https://rpc.moderato.tempo.xyz`). Set them in your **shell**: `.env` configures the apps you start by hand (`npm run dev`, `npm run pay`), and these test suites do not read it. Each leg prints its corridor before funds move.
 
 ## Independent verification
 

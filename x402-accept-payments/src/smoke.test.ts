@@ -225,13 +225,63 @@ test("refuses to start in real mode without a valid DEST_ADDRESS", async () => {
   assert.match(output, /Refusing to start/, `expected the DEST_ADDRESS guard to fire:\n${output}`);
 });
 
+// The corridor is configurable (see FORWARD/REVERSE below), but the only tests that
+// exercise it settle real funds and are opt-in — so a wiring mistake in it would reach
+// a funded run before anything caught it. This test closes that gap with no funds and
+// no chain: a sentinel corridor goes in, and the same sentinel must come back out of
+// the 402 the merchant issues. Stub mode contacts no gateway, so it runs anywhere.
+test("corridor overrides reach the 402 the merchant issues", async () => {
+  // Deliberately not any real chain or token: if the override were ignored, the
+  // assertions would report the shipped default rather than a plausible-looking value.
+  const SOURCE_NETWORK = "eip155:999001";
+  const SOURCE_ASSET = "0x00000000000000000000000000000000000000a1";
+  const DEST_NETWORK = "eip155:999002";
+  const DEST_ASSET = "0x00000000000000000000000000000000000000b2";
+
+  await withMerchant(
+    4082,
+    { ...STUB_ENV, SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK, DEST_ASSET },
+    async ({ url }) => {
+      const res = await fetch(url);
+      assert.equal(res.status, 402, "an unpaid request must be answered with a challenge");
+
+      // The 402 mirrors its PAYMENT-REQUIRED header in the body, so the body is the
+      // readable way to assert on what was offered.
+      const challenge = (await res.json()) as {
+        accepts?: {
+          network?: string;
+          asset?: string;
+          extra?: { atum?: { destination?: { network?: string; asset?: string } } };
+        }[];
+      };
+      const offer = challenge.accepts?.[0];
+      const shown = JSON.stringify(challenge, null, 2);
+
+      assert.equal(offer?.network, SOURCE_NETWORK, `the 402 must name the overridden source network:\n${shown}`);
+      assert.equal(offer?.asset, SOURCE_ASSET, `the 402 must name the overridden source asset:\n${shown}`);
+      const destination = offer?.extra?.atum?.destination;
+      assert.equal(destination?.network, DEST_NETWORK, `the 402 must name the overridden destination network:\n${shown}`);
+      assert.equal(destination?.asset, DEST_ASSET, `the 402 must name the overridden destination asset:\n${shown}`);
+    },
+  );
+});
+
 // --- real end-to-end (opt-in; moves real testnet funds) --------------------
 //
 // Runs only when RUN_REAL_E2E=1 and a funded PRIVATE_KEY is set. It settles a real
 // payment against the hosted facilitator + gateway and asserts the merchant logged a
 // real settlement tx — failing loudly if it sees the stub marker, so it can never
-// give a false pass. Optional overrides: FACILITATOR_URL, GATEWAY_URL, DEST_ADDRESS,
-// RPC_URL (defaults to Base Sepolia).
+// give a false pass.
+//
+// Optional overrides: FACILITATOR_URL, GATEWAY_URL, DEST_ADDRESS; the corridor itself
+// (SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK, DEST_ASSET); and the per-direction
+// source RPCs RPC_URL / REVERSE_RPC_URL (default to the shipped corridor's chains).
+//
+// All of them are read from the EXPORTED ENVIRONMENT, not from .env. Every process
+// this file spawns is deliberately pointed at a nonexistent dotenv path (NO_DOTENV
+// above) so the suite stays hermetic — which also means .env cannot reach it. `.env`
+// repoints the merchant you run by hand (`npm run dev`); export these in your shell
+// to repoint the test.
 const REAL_E2E_ENABLED = process.env.RUN_REAL_E2E === "1" && !!process.env.PRIVATE_KEY;
 
 // Cross-chain settlement runs in child processes whose logs are captured (not echoed),
@@ -251,15 +301,23 @@ async function withHeartbeat<T>(label: string, fn: () => Promise<T>): Promise<T>
   }
 }
 
-// Human labels for the shipped corridor, so the final report reads as chains/tokens
-// rather than raw CAIP-2 ids. Falls back to the raw value for anything not listed.
+// Human labels for the corridor, so the final report reads as chains/tokens rather
+// than raw CAIP-2 ids. Falls back to the raw value for anything not listed, so an
+// unlisted chain still reports honestly — just less readably.
 const CHAIN_NAMES: Record<string, string> = {
   "eip155:84532": "Base Sepolia",
   "eip155:42431": "Tempo (Moderato)",
+  // Mainnet ids are listed too, so a corridor repointed at mainnet still reads as
+  // chains and tokens rather than raw ids.
+  "eip155:8453": "Base",
+  "eip155:4217": "Tempo",
 };
+// Keys are lowercase — endpointLabel lowercases before looking up, so a checksummed
+// address and a lowercase one resolve to the same name.
 const ASSET_NAMES: Record<string, string> = {
-  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
-  "0x20c0000000000000000000000000000000000000": "pathUSD",
+  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC", // Base Sepolia
+  "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": "USDC", // Base mainnet
+  "0x20c0000000000000000000000000000000000000": "pathUSD", // Tempo (both networks)
 };
 function endpointLabel(network: string, asset: string): string {
   return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
@@ -268,7 +326,6 @@ function endpointLabel(network: string, asset: string): string {
 // A settlement direction. The shipped corridor is bidirectional (Base ↔ Tempo): the
 // forward leg is what most integrators run first; the reverse leg proves the ↔.
 interface Direction {
-  label: string;
   sourceNetwork: string;
   sourceAsset: string;
   destNetwork: string;
@@ -276,25 +333,59 @@ interface Direction {
   rpcUrl?: string; // source-chain RPC for the client's Permit2 approval (optional)
 }
 
+// The corridor's label is DERIVED, never stored. A stored string keeps saying
+// "Base Sepolia → Tempo" after an override repoints the corridor, and this label is
+// what the settlement report prints as evidence — a report naming a corridor it did
+// not settle is worse than no report at all.
+function corridorLabel(dir: Direction): string {
+  return `${endpointLabel(dir.sourceNetwork, dir.sourceAsset)} → ${endpointLabel(dir.destNetwork, dir.destAsset)}`;
+}
+
+// Identify an RPC endpoint by origin only. A provider URL commonly carries an API key
+// in its path or query, and this is printed to stdout — where a CI job would archive it.
+function rpcOrigin(url: string | undefined): string {
+  if (!url) return "(none)";
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "(malformed URL)";
+  }
+}
+
+// Corridor overrides, read from the exported environment (see the note above).
+//
+// `??` alone would accept an exported-but-empty variable — `export SOURCE_NETWORK=`,
+// an empty CI matrix cell, a `set -a` wrapper — as a real value and carry "" into the
+// merchant's /defaults lookup, where it fails with nothing pointing back to the cause.
+// Trim, and treat empty as "not set".
+//
+// Deliberately NOT used for the rpcUrl fields below: there, "" is a MEANINGFUL value
+// ("this direction has no chain to approve on") that the stub tests depend on.
+const corridorEnv = (name: string, fallback: string): string =>
+  process.env[name]?.trim() || fallback;
+
+// Source of truth for these four defaults is src/merchant.ts (SOURCE_NETWORK …
+// DEST_ASSET) — same env var names, same values. Keep the two in sync, and .env.example
+// with them; nothing asserts it automatically.
 const FORWARD: Direction = {
-  label: "Base Sepolia → Tempo (Moderato)",
-  sourceNetwork: "eip155:84532",
-  sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  destNetwork: "eip155:42431",
-  destAsset: "0x20c0000000000000000000000000000000000000",
+  sourceNetwork: corridorEnv("SOURCE_NETWORK", "eip155:84532"),
+  sourceAsset: corridorEnv("SOURCE_ASSET", "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+  destNetwork: corridorEnv("DEST_NETWORK", "eip155:42431"),
+  destAsset: corridorEnv("DEST_ASSET", "0x20c0000000000000000000000000000000000000"),
   rpcUrl: process.env.RPC_URL ?? "https://sepolia.base.org",
 };
 
-// Reverse pays FROM Tempo, so the payer must be funded on Tempo (pathUSD — which also
-// covers gas, since Tempo has no native gas token). The source-chain RPC for the Permit2
-// approval defaults to the public Moderato endpoint; override with REVERSE_RPC_URL.
+// The reverse leg spends FROM the destination endpoint — so it mirrors the corridor
+// rather than getting its own four variables, and the payer must be funded on whatever
+// chain that is, including for gas (unless that chain's token covers gas, as Tempo's
+// pathUSD does). Its source-chain RPC for the Permit2 approval defaults to the shipped
+// corridor's destination chain; override with REVERSE_RPC_URL.
 // Runs by default in a funded run; set SKIP_REVERSE=1 to skip it.
 const REVERSE: Direction = {
-  label: "Tempo (Moderato) → Base Sepolia",
-  sourceNetwork: "eip155:42431",
-  sourceAsset: "0x20c0000000000000000000000000000000000000",
-  destNetwork: "eip155:84532",
-  destAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  sourceNetwork: corridorEnv("DEST_NETWORK", "eip155:42431"),
+  sourceAsset: corridorEnv("DEST_ASSET", "0x20c0000000000000000000000000000000000000"),
+  destNetwork: corridorEnv("SOURCE_NETWORK", "eip155:84532"),
+  destAsset: corridorEnv("SOURCE_ASSET", "0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
   rpcUrl: process.env.REVERSE_RPC_URL ?? "https://rpc.moderato.tempo.xyz",
 };
 
@@ -338,8 +429,8 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
     .join("\n");
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — SETTLED (${dir.label})\n` +
-      `     corridor:            ${endpointLabel(dir.sourceNetwork, dir.sourceAsset)}  →  ${endpointLabel(dir.destNetwork, dir.destAsset)}\n` +
+      `  ✅ ${protocol} — SETTLED\n` +
+      `     corridor:            ${corridorLabel(dir)}\n` +
       attemptSummary(clientLog) +
       `     expected amount:     ${amount} (atomic) to ${dest}  — confirm on-chain below\n` +
       `${txLines}\n` +
@@ -349,6 +440,14 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
 
 async function runRealSettlement(dir: Direction, port: number): Promise<void> {
   const privateKey = process.env.PRIVATE_KEY as string;
+
+  // Print the corridor BEFORE anything can fail. Otherwise it appears only in the
+  // success report — so the run that most needs it, a misconfigured override that
+  // never settles, is the one that never shows what it was trying to settle.
+  process.stdout.write(
+    `  → corridor: ${corridorLabel(dir)}  ·  source RPC: ${rpcOrigin(dir.rpcUrl)}\n`,
+  );
+
   const merchantEnv: Record<string, string> = {
     USE_STUB_FACILITATOR: "false",
     DEST_ADDRESS: process.env.DEST_ADDRESS ?? "",
@@ -363,7 +462,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
   await withMerchant(port, merchantEnv, async ({ url, output }) => {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
     // the other direction can't leak in and point the approval at the wrong chain.
-    const result = await withHeartbeat(`x402 real settlement (${dir.label})`, () =>
+    const result = await withHeartbeat(`x402 real settlement (${corridorLabel(dir)})`, () =>
       runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
     );
 
@@ -396,22 +495,24 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
 }
 
 // The corridor is bidirectional, so a funded run settles BOTH ways by default. The
-// reverse leg spends on Tempo (pathUSD, which also covers gas), so the payer must be
-// funded there too; set SKIP_REVERSE=1 to limit a run to the forward (Base → Tempo) leg.
+// reverse leg spends from the destination endpoint, so the payer must be funded there
+// too; set SKIP_REVERSE=1 to limit a run to the forward leg.
 const reverseSkip = !REAL_E2E_ENABLED
   ? "set RUN_REAL_E2E=1 and PRIVATE_KEY to run"
   : process.env.SKIP_REVERSE === "1"
     ? "reverse leg disabled (SKIP_REVERSE=1)"
     : false;
 
+// The test names say which LEG, not which chains: the corridor is a runtime input now,
+// and it is reported by the corridor line each leg prints as it starts.
 test(
-  "real e2e: settles a real Base → Tempo payment against the hosted facilitator",
+  "real e2e (forward): settles a real payment against the hosted facilitator",
   { skip: REAL_E2E_ENABLED ? false : "set RUN_REAL_E2E=1 and PRIVATE_KEY to run" },
   () => runRealSettlement(FORWARD, 4089),
 );
 
 test(
-  "real e2e (reverse): settles a real Tempo → Base payment against the hosted facilitator",
+  "real e2e (reverse): settles a real payment back along the same corridor",
   { skip: reverseSkip },
   () => runRealSettlement(REVERSE, 4090),
 );
