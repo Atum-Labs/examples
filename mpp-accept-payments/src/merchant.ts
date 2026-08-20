@@ -45,6 +45,10 @@ const REALM = process.env.REALM ?? "mpp.example.com";
 const SECRET_KEY = process.env.MPP_SECRET_KEY ?? DEFAULT_SECRET_KEY;
 
 // Exact amount the merchant receives on the destination chain (atomic units).
+//
+// This does NOT scale itself to the destination asset: the corridor is configurable
+// below, and pointing DEST_ASSET at an 18-decimal token leaves 50000 meaning 5e-14 —
+// dust, paid without complaint. Set FULFILLMENT_AMOUNT for that token's decimals.
 const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "50000"; // 0.05 (6-decimal token)
 
 // The stub submitter runs the full flow locally with no gateway and no funds. Set

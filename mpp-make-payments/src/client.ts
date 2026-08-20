@@ -51,14 +51,50 @@ const account = new ethers.Wallet(PRIVATE_KEY).address;
 const method = registerClient({ signer: { privateKey: PRIVATE_KEY }, account });
 const mppx = Mppx.create({ methods: [method] });
 
+/**
+ * Refuse to approve on a different chain than the one the payment names.
+ *
+ * The corridor is configurable on both sides (the merchant's SOURCE_NETWORK, this
+ * client's RPC_URL), and the two are set independently — so "I repointed the corridor
+ * but not the RPC" is the natural mistake, and on-chain revert is otherwise the first
+ * thing that notices.
+ */
+async function assertSignerOnNetwork(provider: ethers.Provider, caip2: string): Promise<void> {
+  // Networks are CAIP-2 `namespace:reference`. `eip155` is the namespace for every EVM
+  // chain (named after EIP-155, which introduced chain ids), and the reference is the
+  // chain id itself — so "eip155:84532" is Base Sepolia.
+  const [namespace, reference] = caip2.split(":");
+  // Only EVM sources are checkable here: a chain id and an ethers provider are
+  // EVM-specific, and a non-EVM source (e.g. `solana:…`) never reaches this client
+  // anyway — the signer registered above is an EVM key.
+  if (namespace !== "eip155" || !reference) return;
+  const expected = BigInt(reference);
+  const actual = (await provider.getNetwork()).chainId;
+  if (actual !== expected) {
+    throw new Error(
+      `RPC_URL is chain ${actual}, but this payment settles on ${caip2} (chain ${expected}). ` +
+        `Point RPC_URL at that chain: approving on the wrong one lets the escrow deposit ` +
+        `revert at settlement, which is a terminal failure that spends this purchase id.`,
+    );
+  }
+}
+
 // Optional: when RPC_URL is set, approve the source token (Permit2) before paying so the
 // escrow deposit does not revert at settlement. The token, chain, and exact amount come
 // from the 402 challenge, and this handler is awaited before the signed retry. Leave
 // RPC_URL unset against the default stub merchant — there is no real chain to approve on.
 if (RPC_URL) {
-  const signer = new ethers.Wallet(PRIVATE_KEY, new ethers.JsonRpcProvider(RPC_URL));
+  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
   mppx.onChallengeReceived(async ({ challenge }) => {
     const { source } = (challenge as AtumEscrowChallenge).request;
+    // The challenge names the chain the payment settles on; RPC_URL names the chain
+    // this signer is bound to. Nothing links the two, so a mismatch is silent — and it
+    // is not harmless: the approval lands on the wrong chain, the escrow deposit
+    // reverts at settlement, and a terminal failure spends this purchase identifier for
+    // good. Check here, while it is still a config error rather than a lost payment.
+    await assertSignerOnNetwork(provider, source.network);
+
     const result = await ensureSourceApproval({
       network: source.network,
       token: source.asset,

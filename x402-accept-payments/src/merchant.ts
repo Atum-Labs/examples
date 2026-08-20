@@ -33,6 +33,10 @@ const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gw.production-te
 
 // The exact amount the merchant receives on the destination chain (atomic units).
 // Default 50000 = 0.05 of a 6-decimal token (e.g. Tempo pathUSD).
+//
+// This does NOT scale itself to the destination asset: the corridor is configurable
+// below, and pointing DEST_ASSET at an 18-decimal token leaves 50000 meaning 5e-14 —
+// dust, paid without complaint. Set FULFILLMENT_AMOUNT for that token's decimals.
 const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "50000";
 
 // Markup over FULFILLMENT_AMOUNT, in basis points (100 bps = 1%). Added on top of

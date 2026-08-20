@@ -93,6 +93,8 @@ Running it in your own private CI: provide an automation token with read access 
 >
 > The payer approves **Permit2** for each source token itself (`ensureSourceApproval`), so there is no manual setup step — just make sure the wallet has gas on the source chain. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
+> **To settle a different corridor,** set `SOURCE_NETWORK` / `SOURCE_ASSET` / `DEST_NETWORK` / `DEST_ASSET` and each leg's source-chain RPC (`RPC_URL` forward, `REVERSE_RPC_URL` reverse) in your **shell**, not in `.env`. `.env` configures the merchant you start by hand with `npm run dev` (see [Going to testnet / mainnet](#going-to-testnet--mainnet)); this test suite does not read it, so a leftover `.env` cannot change what it settles. Each leg prints its corridor before funds move.
+>
 > **A slow corridor needs nothing special.** When settlement outruns the gateway's synchronous window (~30s), the facilitator reports the payment as still settling and the payer re-attempts the same purchase until it has a terminal outcome — so the funded run settles either way. See [Settlement outcomes](#settlement-outcomes).
 
 ## Settlement outcomes
@@ -131,6 +133,11 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
 The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+
+Two things to know when changing the corridor here:
+
+- `FULFILLMENT_AMOUNT` is in **atomic units for a 6-decimal token** and does not rescale itself, so a destination asset with different decimals needs a new value.
+- This `.env` corridor applies to the merchant you start with `npm run dev`. To repoint the **test suite**, export the same variables instead — see [Testing](#testing).
 
 The payer funds the payment (source token + gas) — see [`x402-make-payments`](../x402-make-payments). On a successful real settlement the merchant logs the settlement transaction:
 
