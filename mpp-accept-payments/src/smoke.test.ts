@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
 
@@ -45,8 +46,13 @@ function randomPrivateKey(): string {
   return `0x${randomBytes(32).toString("hex")}`;
 }
 
-// Used both to refuse a port that is already taken and to spot the merchant the
-// moment it starts accepting.
+// Written from inside the merchant's listen callback, so it appears only once this
+// process owns this exact port.
+const merchantListening = (port: number) =>
+  new RegExp(`merchant listening on http://localhost:${port}\\b`, "i");
+
+// A connect is the only portable way to ask whether anything already holds the port
+// without binding it.
 function portAnswers(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect(port);
@@ -61,8 +67,8 @@ function portAnswers(port: number): Promise<boolean> {
   });
 }
 
-// Ready is "the port accepts a connection". The merchant finishes its async setup
-// before it listens, so a slow boot just keeps waiting.
+// Ready is "our merchant is accepting on its port", which the banner above proves and a
+// bare connection cannot.
 function waitForListening(
   child: ChildProcess,
   port: number,
@@ -88,8 +94,8 @@ function waitForListening(
           `(raise MERCHANT_BOOT_TIMEOUT_MS)`,
       );
     }, timeoutMs);
-    // A merchant that dies fails the test now rather than at the timeout. A spawn that
-    // never ran emits `error` instead of `exit`.
+    // A merchant that dies fails the test immediately rather than at the timeout. A spawn
+    // that never ran emits `error` instead of `exit`.
     child.once("exit", (code, signal) => {
       finish();
       fail(`merchant exited early (${signal ? `killed by ${signal}` : `code ${code}`}) without listening`);
@@ -100,7 +106,8 @@ function waitForListening(
     });
     const probe = async (): Promise<void> => {
       if (done) return;
-      if (await portAnswers(port)) {
+      const answered = await portAnswers(port);
+      if (answered && merchantListening(port).test(getOutput())) {
         finish();
         resolve();
         return;
@@ -135,8 +142,8 @@ async function withMerchant(
   env: Record<string, string>,
   fn: (merchant: MerchantHandle) => Promise<void>,
 ): Promise<void> {
-  // Refuse a port something else already holds: the boot wait below would accept that
-  // listener as ready and the test would drive a process it did not start.
+  // Fail in milliseconds with something actionable: the boot wait would otherwise burn
+  // its whole budget waiting for a banner that can never arrive.
   if (await portAnswers(port)) {
     throw new Error(
       `port ${port} is already in use — stop the process holding it (find it with lsof -ti:${port})`,
@@ -189,6 +196,17 @@ function assertPaid(result: { exitCode: number; output: string }, label: string)
     `${label} expected a Payment-Receipt header:\n${result.output}`,
   );
 }
+
+// The banner is the ownership proof, so a reworded log line must fail here in
+// milliseconds rather than as a boot timeout in every other test.
+test("the readiness pattern still matches the merchant's own banner", () => {
+  const source = readFileSync(path.join(MERCHANT_DIR, "src", "merchant.ts"), "utf8");
+  assert.match(
+    source,
+    /merchant listening on http:\/\/localhost:\$\{PORT\}/i,
+    "the merchant's listening banner is what withMerchant waits for",
+  );
+});
 
 // --- stub flow (no gateway or funds) ---------------------------------------
 
