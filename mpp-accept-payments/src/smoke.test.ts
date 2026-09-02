@@ -7,9 +7,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import net from "node:net";
 import { randomBytes } from "node:crypto";
 
 // Boots the real merchant (stub mode — no gateway, no funds) and the real client
@@ -44,39 +46,80 @@ function randomPrivateKey(): string {
   return `0x${randomBytes(32).toString("hex")}`;
 }
 
-function waitForStdout(
-  child: ChildProcessWithoutNullStreams,
-  match: string,
+// Written from inside the merchant's listen callback, so it appears only once this
+// process owns this exact port.
+const merchantListening = (port: number) =>
+  new RegExp(`merchant listening on http://localhost:${port}\\b`, "i");
+
+// A connect is the only portable way to ask whether anything already holds the port
+// without binding it.
+function portAnswers(port: number, timeoutMs = 2_000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect(port);
+    const settle = (answered: boolean) => {
+      socket.destroy();
+      resolve(answered);
+    };
+    // A filtered port answers neither way, and destroying emits `close` rather than
+    // `error`, so the timeout has to settle this itself.
+    socket.setTimeout(timeoutMs, () => settle(false));
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+  });
+}
+
+// Ready is "our merchant is accepting on its port", which the banner above proves and a
+// bare connection cannot.
+function waitForListening(
+  child: ChildProcess,
+  port: number,
   getOutput: () => string,
-  // Boot covers a tsx cold transform of the ~800KB SDK bundle plus, in real mode, a
-  // live gateway /defaults round-trip. Measured ~7s on an unloaded CI runner — half
-  // the old 15s budget — so a loaded one overran it and the suite failed having
-  // settled nothing. Overridable so CI can be generous without slowing local runs.
+  // Boot covers a cold tsx transform of the ~800KB SDK bundle and, in real mode, a
+  // gateway /defaults round-trip — about 7s unloaded, and a CI runner is not unloaded.
   timeoutMs = Number(process.env.MERCHANT_BOOT_TIMEOUT_MS ?? 45_000),
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Accumulate before matching: a split write can land "MPP merchant" and
-    // "listening" in separate chunks, which a per-chunk check would miss.
-    let buf = "";
+    let done = false;
     // Surface what the merchant actually printed — a bad GATEWAY_URL, a busy
     // port, or an invalid amount all exit early, and the reason is in its output.
     const fail = (why: string) =>
       reject(new Error(`${why}\n--- merchant output ---\n${getOutput()}`));
-    const timer = setTimeout(
-      () => fail(`timed out waiting for merchant output to include "${match}"`),
-      timeoutMs,
-    );
-    child.stdout.on("data", (chunk: Buffer) => {
-      buf += chunk.toString();
-      if (buf.includes(match)) {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    child.once("exit", (code) => {
+    const finish = () => {
+      done = true;
       clearTimeout(timer);
-      fail(`merchant exited early (code ${code}) before printing "${match}"`);
-    });
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+    };
+    const timer = setTimeout(() => {
+      finish();
+      fail(
+        `timed out after ${timeoutMs}ms waiting for the merchant to listen on port ${port} ` +
+          `(raise MERCHANT_BOOT_TIMEOUT_MS)`,
+      );
+    }, timeoutMs);
+    // A merchant that dies fails the test immediately rather than at the timeout. A spawn
+    // that never ran emits `error` instead of `exit`.
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      finish();
+      fail(`merchant exited early (${signal ? `killed by ${signal}` : `code ${code}`}) without listening`);
+    };
+    const onError = (err: Error) => {
+      finish();
+      fail(`merchant failed to spawn: ${err.message}`);
+    };
+    child.once("exit", onExit);
+    child.once("error", onError);
+    const probe = async (): Promise<void> => {
+      if (done) return;
+      const answered = await portAnswers(port);
+      if (answered && merchantListening(port).test(getOutput())) {
+        finish();
+        resolve();
+        return;
+      }
+      if (!done) setTimeout(() => void probe(), 100);
+    };
+    void probe();
   });
 }
 
@@ -104,6 +147,14 @@ async function withMerchant(
   env: Record<string, string>,
   fn: (merchant: MerchantHandle) => Promise<void>,
 ): Promise<void> {
+  // Fail in milliseconds with something actionable: the boot wait would otherwise burn
+  // its whole budget waiting for a banner that can never arrive.
+  if (await portAnswers(port)) {
+    throw new Error(
+      `port ${port} is already in use — stop the process holding it (find it with lsof -ti:${port})`,
+    );
+  }
+
   const merchant = spawn(tsxBin(MERCHANT_DIR), ["src/merchant.ts"], {
     cwd: MERCHANT_DIR,
     env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, PORT: String(port), ...env },
@@ -114,10 +165,31 @@ async function withMerchant(
   let output = "";
   merchant.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
   merchant.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  // A child with no `error` listener turns any later failure into an uncaught exception
+  // that ends the whole run, and the boot handlers detach once boot is done.
+  merchant.on("error", () => {});
 
   try {
-    await waitForStdout(merchant, "MPP merchant listening", () => output);
-    await fn({ url: `http://localhost:${port}/paid`, output: () => output });
+    await waitForListening(merchant, port, () => output);
+    const body = fn({ url: `http://localhost:${port}/paid`, output: () => output });
+    // If the merchant dies while the body runs, fail with its output rather than leaving
+    // the body to hit a bare connection error with nothing to explain it.
+    const died = new Promise<never>((_, reject) =>
+      merchant.once("exit", (code, signal) =>
+        reject(
+          new Error(
+            `merchant exited during the test (${signal ? `killed by ${signal}` : `code ${code}`}):\n${output}`,
+          ),
+        ),
+      ),
+    );
+    try {
+      await Promise.race([body, died]);
+    } finally {
+      // A death wins that race with the body still in flight; wait for it so the clients
+      // it spawned cannot leak into the next test.
+      await body.catch(() => {});
+    }
   } finally {
     merchant.kill();
   }
@@ -132,6 +204,17 @@ function assertPaid(result: { exitCode: number; output: string }, label: string)
     `${label} expected a Payment-Receipt header:\n${result.output}`,
   );
 }
+
+// The banner is the ownership proof, so a reworded log line must fail here in
+// milliseconds rather than as a boot timeout in every other test.
+test("the readiness pattern still matches the merchant's own banner", () => {
+  const source = readFileSync(path.join(MERCHANT_DIR, "src", "merchant.ts"), "utf8");
+  assert.match(
+    source,
+    /merchant listening on http:\/\/localhost:\$\{PORT\}/i,
+    "the merchant's listening banner is what withMerchant waits for",
+  );
+});
 
 // --- stub flow (no gateway or funds) ---------------------------------------
 
