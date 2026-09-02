@@ -55,17 +55,18 @@ const merchantListening = (port: number) =>
 
 // A connect is the only portable way to ask whether anything already holds the port
 // without binding it.
-function portAnswers(port: number): Promise<boolean> {
+function portAnswers(port: number, timeoutMs = 2_000): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect(port);
-    socket.once("connect", () => {
+    const settle = (answered: boolean) => {
       socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      resolve(false);
-    });
+      resolve(answered);
+    };
+    // A filtered port answers neither way, and destroying emits `close` rather than
+    // `error`, so the timeout has to settle this itself.
+    socket.setTimeout(timeoutMs, () => settle(false));
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
   });
 }
 
@@ -88,6 +89,8 @@ function waitForListening(
     const finish = () => {
       done = true;
       clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
     };
     const timer = setTimeout(() => {
       finish();
@@ -98,14 +101,16 @@ function waitForListening(
     }, timeoutMs);
     // A merchant that dies fails the test immediately rather than at the timeout. A spawn
     // that never ran emits `error` instead of `exit`.
-    child.once("exit", (code, signal) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       finish();
       fail(`merchant exited early (${signal ? `killed by ${signal}` : `code ${code}`}) without listening`);
-    });
-    child.once("error", (err: Error) => {
+    };
+    const onError = (err: Error) => {
       finish();
       fail(`merchant failed to spawn: ${err.message}`);
-    });
+    };
+    child.once("exit", onExit);
+    child.once("error", onError);
     const probe = async (): Promise<void> => {
       if (done) return;
       const answered = await portAnswers(port);
@@ -159,6 +164,9 @@ async function withMerchant(
   let output = "";
   merchant.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
   merchant.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  // A child with no `error` listener turns any later failure into an uncaught exception
+  // that ends the whole run, and the boot handlers detach once boot is done.
+  merchant.on("error", () => {});
 
   try {
     await waitForListening(merchant, port, () => output);
