@@ -57,7 +57,7 @@ Facilitator: stub (local, no funds)
 
 ### 4. Try a payment
 
-Drive a payment through it with the [`x402-make-payments`](../x402-make-payments) client — a `curl` can't easily produce the signed credential x402 expects. Start this server, then run `npm run pay` there; you should get a `200` with an `Access granted` body.
+Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
 
 ## Testing
 
@@ -67,12 +67,12 @@ npm test
 
 This boots the merchant (stub mode) and drives real payments against it using the `x402-make-payments` client, then checks for a successful `200`. It also covers concurrent payments from different wallets, the same wallet paying more than once, and the server refusing to start when it's misconfigured for real settlement.
 
-**Running the tests needs early-access npm access.** The test drives the `x402-make-payments` client, which depends on `@atumlabs/x402-atum-escrow` — a **restricted** package on npm. It can't be installed without authentication, so the suite runs **locally**, not in public CI.
+**Running the tests needs early-access npm access.** The test drives the `x402-make-payments` client, which depends on `@atumlabs/x402-atum-escrow` — a **restricted** package on npm. `npm login` alone is not enough: the account must be **invited to the `@atumlabs` org with read access**. Verify with `npm view @atumlabs/x402-atum-escrow version` (prints a version; `404` means no access yet). Restricted installs often surface as `404`, not `403`. The suite runs **locally**, not in public CI.
 
 Local (one-time):
 
 ```bash
-npm login                                   # an account granted @atumlabs access
+npm login                                   # account must already be invited to the @atumlabs org
 cd ../x402-make-payments && npm install     # installs the restricted client package
 cd ../x402-accept-payments && npm install
 npm test

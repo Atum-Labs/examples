@@ -18,20 +18,20 @@ By default this example uses a **stub submitter** that returns a canned confirma
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20+ — on Node 20, installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22`; install and stub runs still succeed. Node 22+ silences the warning.
 - npm
-- An npm account granted `@atumlabs` access — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
+- An npm account invited to the `@atumlabs` org with read access — `npm login` alone is not enough. Required to install `@atumlabs/mppx-atum-escrow` (and `@atumlabs/payment-gateway-client` when settling for real); [contact us](mailto:support@atumlabs.xyz) for access. Verify with `npm view @atumlabs/mppx-atum-escrow version` (prints a version; `404` means no access yet). Restricted installs often surface as `404`, not `403`.
 
 ## Quickstart
 
 ### 1. Install dependencies
 
 ```bash
-npm login    # an account granted @atumlabs access
+npm login    # account must already be invited to the @atumlabs org
 npm install
 ```
 
-> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without `npm login` first, the install fails with a `403`/`404` on that package.
+> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without org read access, the install fails with a `404` (sometimes `403`) on that package.
 
 ### 2. Configure environment
 
@@ -58,7 +58,7 @@ Each request is logged with a short id (e.g. `[a1b2c3d4]`) so you can trace one 
 
 ### 4. Try a payment
 
-Drive a payment through it with the [`mpp-make-payments`](../mpp-make-payments) client — a `curl` can't easily produce the signed credential MPP expects. Start this server, then run `npm run pay` there; you should get a `200` with a `Payment-Receipt` header.
+Drive a payment through it with the sibling [`mpp-make-payments`](../mpp-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential MPP expects. You should get a `200` with a `Payment-Receipt` header.
 
 ## Testing
 
