@@ -71,16 +71,11 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env`. **Stub mode needs a valid `PRIVATE_KEY` but no funds** — any throwaway key works. Generate one after install:
-
-```bash
-node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
-# or: cast wallet new
-```
+**A stub run needs no `.env` at all** — skip to `npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. Stub: any valid key / no funds. Real settlement: a funded testnet key. |
+| `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
 

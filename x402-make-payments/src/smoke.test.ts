@@ -239,8 +239,38 @@ test("resuming a purchase reuses its identifier instead of generating a new one"
   }
 });
 
-test("exits with an error when PRIVATE_KEY is missing", async () => {
-  const result = await runClient({ MERCHANT_URL: "http://127.0.0.1:1/paid", PRIVATE_KEY: "" });
+// A stub run signs offline and never touches a chain, so it needs a well-formed key
+// rather than a funded one. Generating one keeps `cp .env.example .env && npm run pay`
+// working on a first run instead of stopping it to go and produce a key by hand.
+test("stub run with no PRIVATE_KEY signs with a generated throwaway key", async () => {
+  const merchant = await startStubMerchant();
+  try {
+    const result = await runClient({ MERCHANT_URL: merchant.url, PRIVATE_KEY: "", RPC_URL: "" });
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
+    assert.match(
+      result.output,
+      /No PRIVATE_KEY set — signing this stub run with a throwaway key \(0x[0-9a-fA-F]{40}\)/,
+      `expected the generated-key notice naming the address:\n${result.output}`,
+    );
+  } finally {
+    merchant.close();
+  }
+});
+
+// Real settlement is the case where a generated key is the wrong answer: it would be an
+// unfunded address, and the failure would surface as a reverted transaction rather than
+// the missing config that caused it. RPC_URL is what marks the run as real.
+test("exits with an error when PRIVATE_KEY is missing and RPC_URL is set", async () => {
+  const result = await runClient({
+    MERCHANT_URL: "http://127.0.0.1:1/paid",
+    PRIVATE_KEY: "",
+    RPC_URL: "http://127.0.0.1:1",
+  });
   assert.notEqual(result.exitCode, 0, `expected a non-zero exit:\n${result.output}`);
-  assert.match(result.output, /PRIVATE_KEY is required/, `expected the missing-key error:\n${result.output}`);
+  assert.match(
+    result.output,
+    /PRIVATE_KEY is required in \.env for real settlement/,
+    `expected the missing-key error:\n${result.output}`,
+  );
 });

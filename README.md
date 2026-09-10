@@ -45,11 +45,15 @@ Where authorized by Atum, the same examples run against mainnet: set the stub fl
 
 ## First run (local stub)
 
-Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, or funds** — only a valid throwaway `PRIVATE_KEY` for the payer.
+Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, funds, or keys** — the payer signs offline, so when `PRIVATE_KEY` is unset it generates a throwaway key for the run and prints the address.
 
 The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
 
-**Node.js 20+** is the documented floor (CI and stub runs work on 20). On Node 20, MPP installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22` — install and stub runs still succeed; Node 22+ silences the warning.
+### Node.js
+
+**Node.js 20+** is the floor; CI covers 20, 22, and 24. On Node 20, MPP installs print `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22` — install and stub runs still succeed, and Node 22+ silences it. The x402 apps are unaffected.
+
+### Run it
 
 1. Install all four apps:
 
@@ -65,18 +69,16 @@ cp .env.example .env
 npm run dev
 ```
 
-3. **Terminal 2** — x402 payer: copy `.env`, set any valid `PRIVATE_KEY` (no funds), then pay:
+3. **Terminal 2** — x402 payer. No `.env` needed for a stub run:
 
 ```bash
 cd x402-make-payments
-cp .env.example .env
-# generate a throwaway key if you need one, e.g.:
-#   node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
-#   # or: cast wallet new
 npm run pay
 ```
 
-MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`.
+You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`.
+
+Set `PRIVATE_KEY` in `.env` (copied from `.env.example`) when you move to real settlement — see [Environments](#environments).
 
 ## Running the tests
 

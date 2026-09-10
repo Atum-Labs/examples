@@ -14,10 +14,20 @@ import { payPurchase } from "./purchase.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID } = process.env;
 
-if (!PRIVATE_KEY) {
-  console.error("Error: PRIVATE_KEY is required in .env");
+// A stub run needs a well-formed key, not a funded one: the payment is signed offline and
+// never touches a chain. So rather than stop a first run to go and produce a key, generate
+// a throwaway one when none is set.
+//
+// RPC_URL is what separates that from a real settlement — it is only set when there is a
+// chain to approve on. There a generated key would mean an unfunded address, and the first
+// thing to notice would be a failed transaction rather than the missing config behind it,
+// so keep refusing.
+if (!PRIVATE_KEY && RPC_URL) {
+  console.error("Error: PRIVATE_KEY is required in .env for real settlement (RPC_URL is set).");
   process.exit(1);
 }
+
+const privateKey = PRIVATE_KEY || ethers.Wallet.createRandom().privateKey;
 
 // Names the purchase this run is paying for. The merchant stamps it into the 402
 // challenge, the client derives the payment's identity from it, and Atum resolves a
@@ -44,11 +54,16 @@ const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(pur
 
 // The source-chain account is derived from the key. The server rejects a credential
 // whose deposit signature does not recover to this account, so the two must match.
-const account = new ethers.Wallet(PRIVATE_KEY).address;
+const account = new ethers.Wallet(privateKey).address;
+
+if (!PRIVATE_KEY) {
+  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
+  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+}
 
 // Register `atum-escrow` on the mppx client. The private key is bound to the
 // challenge's source chain automatically, so one registration pays any supported source.
-const method = registerClient({ signer: { privateKey: PRIVATE_KEY }, account });
+const method = registerClient({ signer: { privateKey }, account });
 const mppx = Mppx.create({ methods: [method] });
 
 /**
@@ -85,7 +100,7 @@ async function assertSignerOnNetwork(provider: ethers.Provider, caip2: string): 
 // RPC_URL unset against the default stub merchant — there is no real chain to approve on.
 if (RPC_URL) {
   const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+  const signer = new ethers.Wallet(privateKey, provider);
   mppx.onChallengeReceived(async ({ challenge }) => {
     const { source } = (challenge as AtumEscrowChallenge).request;
     // The challenge names the chain the payment settles on; RPC_URL names the chain

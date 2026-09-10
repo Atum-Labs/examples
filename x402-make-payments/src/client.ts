@@ -15,10 +15,20 @@ import { payPurchase } from "./purchase.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID } = process.env;
 
-if (!PRIVATE_KEY) {
-  console.error("Error: PRIVATE_KEY is required in .env");
+// A stub run needs a well-formed key, not a funded one: the payment is signed offline and
+// never touches a chain. So rather than stop a first run to go and produce a key, generate
+// a throwaway one when none is set.
+//
+// RPC_URL is what separates that from a real settlement — it is only set when there is a
+// chain to approve on. There a generated key would mean an unfunded address, and the first
+// thing to notice would be a failed transaction rather than the missing config behind it,
+// so keep refusing.
+if (!PRIVATE_KEY && RPC_URL) {
+  console.error("Error: PRIVATE_KEY is required in .env for real settlement (RPC_URL is set).");
   process.exit(1);
 }
+
+const privateKey = PRIVATE_KEY || ethers.Wallet.createRandom().privateKey;
 
 // Names the purchase this run is paying for. The client derives the payment's identity
 // from it, so Atum resolves a re-attempt onto the original payment instead of taking a
@@ -38,7 +48,13 @@ if (!PRIVATE_KEY) {
 // the same payment, and later runs would be served without paying.
 const purchaseId = PURCHASE_ID || `order_${randomBytes(10).toString("hex")}`;
 
-const wallet = new ethers.Wallet(PRIVATE_KEY);
+const wallet = new ethers.Wallet(privateKey);
+
+if (!PRIVATE_KEY) {
+  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${wallet.address}).`);
+  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+}
+
 const client = new x402Client();
 registerAtumEscrowScheme(client, { signer: wallet });
 
@@ -81,7 +97,7 @@ async function assertSignerOnNetwork(provider: ethers.Provider, caip2: string): 
 // failure, and a terminal failure spends that purchase identifier for good.
 if (RPC_URL) {
   const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+  const signer = new ethers.Wallet(privateKey, provider);
   const owner = await wallet.getAddress();
 
   client.onBeforePaymentCreation(async ({ selectedRequirements }) => {
