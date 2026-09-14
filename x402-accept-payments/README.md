@@ -32,7 +32,7 @@ In stub mode, steps 4–5 are short-circuited in-process with a canned success �
 npm install
 ```
 
-The merchant itself has no private dependencies — it runs the stub flow with only public packages. That's deliberate: x402's server side is a public spec, so this merchant is hand-rolled on public packages, unlike the [`mpp-accept-payments`](../mpp-accept-payments) merchant, which builds on Atum's `mppx` method. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client, which needs early-access npm access — see that example and [Testing](#testing) below.)
+The merchant itself has no Atum SDK dependency — it runs the stub flow with only public packages. That's deliberate: x402's server side is a public spec, so this merchant is hand-rolled on public packages, unlike the [`mpp-accept-payments`](../mpp-accept-payments) merchant, which builds on Atum's `mppx` method. (Driving a real payment through it uses the [`x402-make-payments`](../x402-make-payments) client — see that example and [Testing](#testing) below.)
 
 ### 2. Configure environment
 
@@ -67,22 +67,14 @@ npm test
 
 This boots the merchant (stub mode) and drives real payments against it using the `x402-make-payments` client, then checks for a successful `200`. It also covers concurrent payments from different wallets, the same wallet paying more than once, and the server refusing to start when it's misconfigured for real settlement.
 
-**Running the tests needs early-access npm access.** The test drives the `x402-make-payments` client, which depends on `@atumlabs/x402-atum-escrow` — a **restricted** package on npm. `npm login` alone is not enough: the account must be **invited to the `@atumlabs` org with read access**. Verify with `npm view @atumlabs/x402-atum-escrow version` (prints a version; `404` means no access yet). Restricted installs often surface as `404`, not `403`. The suite runs **locally**, not in public CI.
+The test drives the `x402-make-payments` client, which depends on `@atumlabs/x402-atum-escrow`. The suite runs **locally**, not in public CI.
 
 Local (one-time):
 
 ```bash
-npm login                                   # account must already be invited to the @atumlabs org
-cd ../x402-make-payments && npm install     # installs the restricted client package
+cd ../x402-make-payments && npm install
 cd ../x402-accept-payments && npm install
 npm test
-```
-
-Running it in your own private CI: provide an automation token with read access to the `@atumlabs` scope as an `NPM_TOKEN` secret, write an `.npmrc` before install, then `npm ci` in both apps and `npm test`:
-
-```
-//registry.npmjs.org/:_authToken=${NPM_TOKEN}
-@atumlabs:registry=https://registry.npmjs.org
 ```
 
 > The end-to-end test that settles against the live facilitator is **opt-in** — it moves real testnet funds. Run it with a funded wallet:

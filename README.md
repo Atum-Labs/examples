@@ -47,17 +47,11 @@ Where authorized by Atum, the same examples run against mainnet: set the stub fl
 
 Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, or funds** — only a valid throwaway `PRIVATE_KEY` for the payer.
 
-**npm access (`@atumlabs`).** Several packages are restricted early-access npm under `@atumlabs`. `npm login` alone is not enough — your account must be **invited to the `@atumlabs` org with read access**. Packages involved: `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, `@atumlabs/payment-gateway-client`. Verify before installing:
-
-```bash
-npm view @atumlabs/x402-atum-escrow version   # prints a version; 404 means no access yet
-```
-
-Unauthenticated or restricted installs often surface as `404`, not `403`.
+The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
 
 **Node.js 20+** is the documented floor (CI and stub runs work on 20). On Node 20, MPP installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22` — install and stub runs still succeed; Node 22+ silences the warning.
 
-1. Install all four apps (after npm access is confirmed):
+1. Install all four apps:
 
 ```bash
 npm run install:all
@@ -98,8 +92,6 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm run typecheck` | `tsc --noEmit` across all four apps | — |
 
 ### Step 1 - Install
-
-Requires `@atumlabs` org read access — see [First run (local stub)](#first-run-local-stub). Then:
 
 ```bash
 npm run install:all

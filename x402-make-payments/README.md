@@ -56,18 +56,14 @@ This example is designed to work alongside [`x402-accept-payments`](../x402-acce
 
 - **Node.js 20+** — includes npm.
 - **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub.
-- **An npm account invited to the `@atumlabs` org with read access** — `npm login` alone is not enough. Required to install `@atumlabs/x402-atum-escrow`; [contact us](mailto:support@atumlabs.xyz) for access. Verify with `npm view @atumlabs/x402-atum-escrow version` (prints a version; `404` means no access yet). Restricted installs often surface as `404`, not `403`.
 
 ## Quickstart
 
 ### 1. Install dependencies
 
 ```bash
-npm login    # account must already be invited to the @atumlabs org
 npm install
 ```
-
-> `@atumlabs/x402-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without org read access, the install fails with a `404` (sometimes `403`) on that package.
 
 ### 2. Configure environment
 
