@@ -51,20 +51,16 @@ This example is designed to work alongside [`mpp-accept-payments`](../mpp-accept
 
 ## Prerequisites
 
-- **Node.js 20+** — includes npm.
+- **Node.js 20+** — includes npm. On Node 20, installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22`; install and stub runs still succeed. Node 22+ silences the warning.
 - **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub submitter.
-- **An npm account granted `@atumlabs` access** — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
 
 ## Quickstart
 
 ### 1. Install dependencies
 
 ```bash
-npm login    # an account granted @atumlabs access
 npm install
 ```
-
-> `@atumlabs/mppx-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without `npm login` first, the install fails with a `403`/`404` on that package.
 
 ### 2. Configure environment
 
@@ -72,11 +68,16 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env`. **Stub mode needs a valid `PRIVATE_KEY` but no funds** — any throwaway key works. Generate one after install:
+
+```bash
+node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
+# or: cast wallet new
+```
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
+| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. Stub: any valid key / no funds. Real settlement: a funded testnet key. |
 | `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 

@@ -56,18 +56,14 @@ This example is designed to work alongside [`x402-accept-payments`](../x402-acce
 
 - **Node.js 20+** — includes npm.
 - **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub.
-- **An npm account granted `@atumlabs` access** — required to install the escrow package; [contact us](mailto:support@atumlabs.xyz) for access.
 
 ## Quickstart
 
 ### 1. Install dependencies
 
 ```bash
-npm login    # an account granted @atumlabs access
 npm install
 ```
-
-> `@atumlabs/x402-atum-escrow` is published to npm under the `@atumlabs` scope, currently in **early access** (restricted). Without `npm login` first, the install fails with a `403`/`404` on that package.
 
 ### 2. Configure environment
 
@@ -75,11 +71,16 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env`. **Stub mode needs a valid `PRIVATE_KEY` but no funds** — any throwaway key works. Generate one after install:
+
+```bash
+node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
+# or: cast wallet new
+```
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. |
+| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. Stub: any valid key / no funds. Real settlement: a funded testnet key. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
 

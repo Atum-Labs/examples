@@ -6,7 +6,7 @@ Proprietary reference implementations for approved developers building applicati
 
 This repo is the fastest way to see an Atum payment work end-to-end — and during early access it's the **source of truth**: where anything else (the docs, an SDK default, an older guide) disagrees with these examples, follow the examples. They're pinned to the environment and corridor we actively test.
 
-- **New here?** Start in stub mode (no funds), then move to real settlement — see [Environments](#environments) below. The path we've hardened for this preview is [Base Sepolia ↔ Tempo](#hosted-testnet-production-testnet); other chains exist in the platform, but this corridor is the most predictable to test here.
+- **New here?** Start in stub mode (no funds) — see [First run (local stub)](#first-run-local-stub) — then move to real settlement under [Environments](#environments). The path we've hardened for this preview is [Base Sepolia ↔ Tempo](#hosted-testnet-production-testnet); other chains exist in the platform, but this corridor is the most predictable to test here.
 - **`production-testnet` is real but still hardening.** Expect the occasional slow corridor. A settlement that outruns the gateway's ~30s synchronous window is not a failure — the payer re-attempts the same purchase and collects the outcome, and cannot be charged twice for it.
 - **Hit a bump?** Email [support@atumlabs.xyz](mailto:support@atumlabs.xyz) and tell us the specific friction you ran into.
 
@@ -42,6 +42,41 @@ Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-start
 ### Mainnet
 
 Where authorized by Atum, the same examples run against mainnet: set the stub flag to `false`, point the gateway and facilitator URLs at the production endpoints Atum provides, and set the corridor to Atum-authorized mainnet chains and tokens. Contact Atum for production access and URLs.
+
+## First run (local stub)
+
+Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, or funds** — only a valid throwaway `PRIVATE_KEY` for the payer.
+
+The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
+
+**Node.js 20+** is the documented floor (CI and stub runs work on 20). On Node 20, MPP installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22` — install and stub runs still succeed; Node 22+ silences the warning.
+
+1. Install all four apps:
+
+```bash
+npm run install:all
+```
+
+2. **Terminal 1** — x402 merchant (port 4020):
+
+```bash
+cd x402-accept-payments
+cp .env.example .env
+npm run dev
+```
+
+3. **Terminal 2** — x402 payer: copy `.env`, set any valid `PRIVATE_KEY` (no funds), then pay:
+
+```bash
+cd x402-make-payments
+cp .env.example .env
+# generate a throwaway key if you need one, e.g.:
+#   node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
+#   # or: cast wallet new
+npm run pay
+```
+
+MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`.
 
 ## Running the tests
 
