@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Proprietary Atum reference examples for accepting and making payments over **x402** and **MPP**. Not open source — see [`LICENSE`](./LICENSE).
+Atum reference examples for accepting and making payments over **x402** and **MPP**. Licensed under MIT — see [`LICENSE`](./LICENSE).
 
 **Tested corridor:** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the corridor these examples are hardened against is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. The [root README](./README.md) is the source of truth for that hardened corridor and its status; each app's `.env.example` holds the exact chains, assets, and addresses it's wired to. Other supported corridors work but aren't hardened here — prefer the hardened one for anything you need to rely on.
 
