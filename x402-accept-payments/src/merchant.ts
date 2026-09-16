@@ -21,9 +21,14 @@ const PORT = Number(process.env.PORT ?? 4020);
 const USE_STUB_FACILITATOR = (process.env.USE_STUB_FACILITATOR ?? "true") !== "false";
 
 // Where the merchant sends /verify and /settle in real mode — Atum's hosted x402
-// facilitator. Ignored by the stub.
+// facilitator, served by the payment gateway. Ignored by the stub.
+//
+// A BASE url: /verify and /settle are appended to it, so the /x402/v1 prefix is part
+// of the value rather than something the code adds. The gateway serves the facilitator
+// alongside its own REST API on one host, so the operations sit under that prefix and
+// are versioned against the published facilitator contract rather than the gateway's.
 const FACILITATOR_URL =
-  process.env.FACILITATOR_URL ?? "https://x402-facilitator.production-testnet.atum.xyz";
+  process.env.FACILITATOR_URL ?? "https://payment-gw.production-testnet.atum.xyz/x402/v1";
 
 // Payment Gateway base URL. In real mode the merchant READS its corridor's contract
 // addresses (escrow, proxy, reserver, releaser, verifier) from GET /defaults here at
