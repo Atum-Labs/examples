@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Example merchant server that accepts MPP (Machine Payments Protocol) payments using Atum's atum-escrow method",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx src/merchant.ts",

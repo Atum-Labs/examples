@@ -4,7 +4,7 @@ This guide shows how to apply these examples to **real settlement**, and how to 
 
 The question it answers is: **is settlement over these protocols real, verifiable?** You can confirm that, end to end, with on-chain evidence — no Atum-side demo required.
 
-> **Proprietary reference material.** See the [root README](../README.md) and [`LICENSE`](../LICENSE). Chains, assets, corridors, gateway, and facilitator shown here are illustrative and require separate Atum authorization.
+> Licensed under MIT — see the [root README](../README.md) and [`LICENSE`](../LICENSE). Chains, assets, corridors, gateway, and facilitator shown here are the hosted testnet defaults.
 
 > **Corridor.** Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples are **tested and hardened** against — and wired to out of the box — is **Base Sepolia USDC ↔ Tempo (Moderato) pathUSD**. See the [root README](../README.md) for its hardening status, and each app's `.env.example` for the exact chains, assets, and addresses. The proof method below is corridor-agnostic — the commands just use the hardened corridor for concreteness. To prove another supported corridor, export `SOURCE_NETWORK`/`SOURCE_ASSET`/`DEST_NETWORK`/`DEST_ASSET` plus each leg's source RPC (see [x402](#x402) below), and substitute the block explorers.
 
