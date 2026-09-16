@@ -1,8 +1,6 @@
 /*
- * Copyright (c) 2026 Atum Labs, Inc. All rights reserved.
- * Proprietary reference implementation; not open source.
- * Access and use are governed by the LICENSE file at the root of this repository.
- * Do not remove, alter, or obscure this notice.
+ * Copyright (c) 2026 Atum Labs, Inc.
+ * SPDX-License-Identifier: MIT
  */
 
 // Re-attempting a purchase until it reaches a terminal outcome.

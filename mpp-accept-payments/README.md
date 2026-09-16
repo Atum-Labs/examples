@@ -4,7 +4,7 @@ An example merchant server that accepts payments over the [Machine Payments Prot
 
 The merchant gates a route (`GET /paid/<purchase id>`) behind payment. Unlike x402, MPP has **no separate facilitator**: the server verifies the payment credential in-process with the `mppx` SDK, then submits it to Atum for settlement through a `PaymentSubmitter`.
 
-> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+> Licensed under MIT — see the [root LICENSE](../LICENSE). The packages, gateway, chains, assets, and corridors shown here are the hosted testnet defaults. Atum makes no promise of support, maintenance, compatibility, or production availability.
 
 ## How it works
 

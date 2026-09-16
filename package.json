@@ -2,6 +2,7 @@
   "name": "atum-examples",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Root orchestration for the Atum x402 & MPP examples. Each example is a standalone project; these scripts just install, typecheck, and test them all together.",
   "scripts": {
     "install:all": "npm install --prefix x402-make-payments && npm install --prefix mpp-make-payments && npm install --prefix x402-accept-payments && npm install --prefix mpp-accept-payments",

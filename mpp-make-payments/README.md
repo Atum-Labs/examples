@@ -2,7 +2,7 @@
 
 An example client that programmatically pays for an HTTP-gated resource over the [Machine Payments Protocol (MPP)](https://mpp.dev) using Atum's `atum-escrow` method.
 
-> **Proprietary reference example.** This is an Atum reference implementation provided to approved developers — not open-source software. The packages, gateway, chains, assets, and corridors it shows (e.g. Base Sepolia, Tempo, pathUSD) are illustrative; their availability and your access to them require separate Atum authorization and are **not** implied by their appearance here. Atum makes no promise of support, maintenance, compatibility, or production availability. Contact Atum for access.
+> Licensed under MIT — see the [root LICENSE](../LICENSE). The packages, gateway, chains, assets, and corridors shown here are the hosted testnet defaults. Atum makes no promise of support, maintenance, compatibility, or production availability.
 
 ## How it works
 
