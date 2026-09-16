@@ -22,7 +22,7 @@ The examples run against three environments. Every merchant example defaults to 
 
 ### Local (stub)
 
-Both merchant examples default to stub mode. The full `402 → pay → 200` flow runs in-process with no gateway, facilitator, or funds, so any private key works. Start here to confirm your wiring before touching real settlement.
+Both merchant examples default to stub mode. The full `402 → pay → 200` flow runs in-process with no gateway, facilitator, funds, or keys — when `PRIVATE_KEY` is unset the payer generates a throwaway key for the run. Start here to confirm your wiring before touching real settlement.
 
 ### Hosted testnet (`production-testnet`)
 
@@ -105,7 +105,7 @@ npm run install:all
 npm test
 ```
 
-Hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds, so any private key works. It's the fast "is the wiring intact?" check; the funded e2e tests auto-skip.
+Hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds, no key required. It's the fast "is the wiring intact?" check; the funded e2e tests auto-skip.
 
 ### Step 3 - Funded settlement — real testnet funds
 
