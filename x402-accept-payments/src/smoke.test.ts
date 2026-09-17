@@ -75,7 +75,7 @@ function waitForListening(
   port: number,
   getOutput: () => string,
   // Boot covers a cold tsx transform of the ~800KB SDK bundle and, in real mode, a
-  // gateway /defaults round-trip — about 7s unloaded, and a CI runner is not unloaded.
+  // gateway /v1/defaults round-trip — about 7s unloaded, and a CI runner is not unloaded.
   timeoutMs = Number(process.env.MERCHANT_BOOT_TIMEOUT_MS ?? 45_000),
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -437,7 +437,7 @@ function rpcOrigin(url: string | undefined): string {
 //
 // `??` alone would accept an exported-but-empty variable — `export SOURCE_NETWORK=`,
 // an empty CI matrix cell, a `set -a` wrapper — as a real value and carry "" into the
-// merchant's /defaults lookup, where it fails with nothing pointing back to the cause.
+// merchant's /v1/defaults lookup, where it fails with nothing pointing back to the cause.
 // Trim, and treat empty as "not set".
 //
 // Deliberately NOT used for the rpcUrl fields below: there, "" is a MEANINGFUL value

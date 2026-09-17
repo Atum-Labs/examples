@@ -129,7 +129,7 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/v1/defaults` automatically — you never paste them by hand (verified: `/v1/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
 
 The facilitator and the gateway are the same host: Atum serves the x402 facilitator from the payment gateway, with its three operations under a `/x402/v1` prefix so they stay versioned against the published facilitator contract rather than the gateway's own REST API. `FACILITATOR_URL` is a **base URL** — the merchant appends `/verify` and `/settle` to it — so that prefix belongs in the value, while `GATEWAY_URL` stays a bare host and gets `/defaults` appended.
 
@@ -142,7 +142,7 @@ The payer funds the payment (source token + gas) — see [`x402-make-payments`](
 
 ```
 Merchant listening on http://localhost:4020
-Facilitator: real https://payment-gw.production-testnet.atum.xyz/x402/v1 · corridor from https://payment-gw.production-testnet.atum.xyz/defaults
+Facilitator: real https://payment-gw.production-testnet.atum.xyz/x402/v1 · corridor from https://payment-gw.production-testnet.atum.xyz/v1/defaults
 → 402: no payment credential, issuing challenge
 → 402: still settling (payment pay_…) — awaiting the payer's re-attempt
 → 402: no payment credential, issuing challenge

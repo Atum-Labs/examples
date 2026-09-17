@@ -29,7 +29,7 @@ const FACILITATOR_URL =
   process.env.FACILITATOR_URL ?? "https://payment-gw.production-testnet.atum.xyz/x402/v1";
 
 // Payment Gateway base URL. In real mode the merchant READS its corridor's contract
-// addresses (escrow, proxy, reserver, releaser, verifier) from GET /defaults here at
+// addresses (escrow, proxy, reserver, releaser, verifier) from GET /v1/defaults here at
 // startup, rather than hardcoding them — they are Atum-network facts, not merchant
 // config. The stub uses built-in placeholders and contacts no gateway.
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gw.production-testnet.atum.xyz";
@@ -234,7 +234,7 @@ const SETTLEMENT_FAILED = "settlement_failed";
 // Corridor contract addresses.
 //
 // These are Atum-network facts, not merchant business config — so in real mode the
-// merchant READS them from the payment gateway's GET /defaults?chain_id=... at
+// merchant READS them from the payment gateway's GET /v1/defaults?chain_id=... at
 // startup (mirroring the reference merchant in atum-core), rather than making you
 // paste five addresses into .env by hand. The source chain supplies the escrow, the
 // reserver (quote_selector), and the releaser + verifier endpoint (fulfillment_verifier);
@@ -251,7 +251,7 @@ interface CorridorContracts {
   fulfillmentVerifierEndpoint: string;
 }
 
-// The subset of GET /defaults this example reads.
+// The subset of GET /v1/defaults this example reads.
 interface ChainDefaults {
   escrow_contract: string;
   fulfillment_proxy: string;
@@ -260,9 +260,9 @@ interface ChainDefaults {
 }
 
 async function fetchDefaults(chainId: string): Promise<ChainDefaults> {
-  const res = await fetch(`${GATEWAY_URL}/defaults?chain_id=${encodeURIComponent(chainId)}`);
+  const res = await fetch(`${GATEWAY_URL}/v1/defaults?chain_id=${encodeURIComponent(chainId)}`);
   if (!res.ok) {
-    throw new Error(`GET /defaults for ${chainId} failed: ${res.status} ${res.statusText}`);
+    throw new Error(`GET /v1/defaults for ${chainId} failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as ChainDefaults;
 }
@@ -614,7 +614,7 @@ async function main(): Promise<void> {
     `x402 merchant starting (${
       USE_STUB_FACILITATOR
         ? "stub (local, no funds)"
-        : `real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/defaults`
+        : `real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/v1/defaults`
     })`,
   );
   const corridor = await resolveCorridor();
@@ -626,7 +626,7 @@ async function main(): Promise<void> {
     console.log(
       USE_STUB_FACILITATOR
         ? "Facilitator: stub (local, no funds)"
-        : `Facilitator: real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/defaults`,
+        : `Facilitator: real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/v1/defaults`,
     );
   });
 }
