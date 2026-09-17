@@ -1,6 +1,6 @@
 # Atum Examples
 
-Reference implementations for accepting and making payments over x402 and MPP. Licensed under MIT — see [License](#license).
+Reference implementations for accepting and making payments over x402, MPP, and the direct Payment Gateway client (PGC). Licensed under MIT — see [License](#license).
 
 ## Early access? Start here
 
@@ -17,21 +17,22 @@ The examples run against three environments. Every merchant example defaults to 
 | Environment | Use it to | Settlement | Funds | Opt in with |
 | --- | --- | --- | --- | --- |
 | **Local (stub)** | Wire up and debug your integration | Simulated in-process | None | Default |
-| **Hosted testnet** (`production-testnet`) | Validate a real end-to-end payment | Real, on testnet rails | Testnet funds | `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP) |
+| **Hosted testnet** (`production-testnet`) | Validate a real end-to-end payment | Real, on testnet rails | Testnet funds | `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP) / `USE_STUB_GATEWAY=false` (PGC; staging-testnet until prod is on v4) |
 | **Mainnet** | Go live (where authorized by Atum) | Real, on mainnet rails | Real funds | Stub flag `false` + Atum-provided production URLs |
 
 ### Local (stub)
 
-Both merchant examples default to stub mode. The full `402 → pay → 200` flow runs in-process with no gateway, facilitator, funds, or keys — when `PRIVATE_KEY` is unset the payer generates a throwaway key for the run. Start here to confirm your wiring before touching real settlement.
+The merchant examples and the PGC client default to stub mode. x402/MPP run the full `402 → pay → 200` flow in-process; PGC runs prepare → sign → submit → collect against an in-process stub. No hosted gateway, facilitator, funds, or keys — when `PRIVATE_KEY` is unset the payer generates a throwaway key for the run. Start here to confirm your wiring before touching real settlement.
 
 ### Hosted testnet (`production-testnet`)
 
-Set the stub flag to `false` to settle for real over Atum's hosted testnet. The apps ship pointed at:
+Set the stub flag to `false` to settle for real. x402 and MPP ship pointed at production-testnet; PGC is pointed at **staging-testnet** until production-testnet is on the v4 contracts. The hosted endpoints:
 
 | Service | URL |
 | --- | --- |
 | Payment Gateway (MPP settlement + x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://x402-facilitator.production-testnet.atum.xyz` |
+| Payment Gateway (PGC real settlement, until prod is on v4) | `https://payment-gw.staging-testnet.atumlabs.xyz` |
 
 Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded on the chain it spends from (the payers handle the Permit2 approval themselves). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor).
 
@@ -47,7 +48,7 @@ Where authorized by Atum, the same examples run against mainnet: set the stub fl
 
 Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, funds, or keys** — the payer signs offline, so when `PRIVATE_KEY` is unset it generates a throwaway key for the run and prints the address.
 
-The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
+The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite. Until the v4 Payment Gateway client is published, `pgc-make-payments` installs a packed snapshot of that package from `protocol` rather than pinning a registry version that is about to go stale.
 
 ### Node.js
 
@@ -55,7 +56,7 @@ The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`,
 
 ### Run it
 
-1. Install all four apps:
+1. Install all five apps:
 
 ```bash
 npm run install:all
@@ -76,7 +77,7 @@ cd x402-make-payments
 npm run pay
 ```
 
-You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`.
+You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
 
 Set `PRIVATE_KEY` in `.env` (copied from `.env.example`) when you move to real settlement — see [Environments](#environments).
 
@@ -86,12 +87,12 @@ Each example is a standalone project with its own tests, but the repo root has a
 
 | Command | What it runs | Funds |
 | --- | --- | --- |
-| `npm run install:all` | `npm install` in all four apps | — |
-| `npm test` | Smoke tests for all four apps (alias for `test:smoke`) | None |
-| `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt path | None |
-| `npm run test:e2e` | Real, funded settlement for both protocols, **both directions** of the shipped corridor | Real testnet funds (both chains) |
+| `npm run install:all` | `npm install` in all five apps | — |
+| `npm test` | Smoke tests for all five apps (alias for `test:smoke`) | None |
+| `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt / wait path | None |
+| `npm run test:e2e` | Real, funded settlement for x402 and MPP, **both directions** of the shipped corridor | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
-| `npm run typecheck` | `tsc --noEmit` across all four apps | — |
+| `npm run typecheck` | `tsc --noEmit` across all five apps | — |
 
 ### Step 1 - Install
 
@@ -105,7 +106,7 @@ npm run install:all
 npm test
 ```
 
-Hermetic: the full `402 → pay → 200` flow runs in-process against a stub — no gateway, no facilitator, no funds, no key required. It's the fast "is the wiring intact?" check; the funded e2e tests auto-skip.
+Hermetic: x402/MPP run the full `402 → pay → 200` flow in-process against a stub; PGC runs prepare → sign → submit → collect against its own stub — no gateway, no facilitator, no funds, no key required. It's the fast "is the wiring intact?" check; the funded e2e tests auto-skip.
 
 ### Step 3 - Funded settlement — real testnet funds
 
