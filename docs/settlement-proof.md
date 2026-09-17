@@ -32,7 +32,7 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 
 ## Prerequisites for settlement proof
 
-- Node.js 20+ and npm. On Node 20, MPP installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22`; install and runs still succeed. Node 22+ silences the warning.
+- Node.js 20+ and npm. On Node 20 the MPP installs print `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22`; install and runs still succeed, and Node 22+ silences it.
 - A **funded wallet on every chain it spends from** — for the shipped corridor that's Base Sepolia (testnet USDC to spend, plus ETH for gas) and, because the funded test settles **both directions** by default, Tempo (Moderato) as well (pathUSD, which also covers gas: `cast rpc tempo_fundAddress <your-address> --rpc-url https://rpc.moderato.tempo.xyz`). Set `SKIP_REVERSE=1` to run the forward leg only and fund just one chain.
 - A **receiving address on the destination chain** — for the shipped corridor, Tempo (Moderato), where the merchant is paid out.
 

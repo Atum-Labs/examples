@@ -51,7 +51,7 @@ This example is designed to work alongside [`mpp-accept-payments`](../mpp-accept
 
 ## Prerequisites
 
-- **Node.js 20+** — includes npm. On Node 20, installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22`; install and stub runs still succeed. Node 22+ silences the warning.
+- **Node.js 20+** — includes npm. On Node 20 the install prints `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22`; install and stub runs still succeed, and Node 22+ silences it.
 - **A funded testnet wallet** — only for a real (non-stub) settlement: it needs the source token plus a little gas on the source chain. The client grants the Permit2 approval itself, so there is no manual approval step. Not needed against the merchant's default stub submitter.
 
 ## Quickstart
@@ -68,16 +68,11 @@ npm install
 cp .env.example .env
 ```
 
-Edit `.env`. **Stub mode needs a valid `PRIVATE_KEY` but no funds** — any throwaway key works. Generate one after install:
-
-```bash
-node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
-# or: cast wallet new
-```
+**A stub run needs no `.env` at all** — skip to `npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | Yes | 0x-prefixed 32-byte hex private key for the payer wallet. The source account is derived from it. Stub: any valid key / no funds. Real settlement: a funded testnet key. |
+| `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
 | `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 

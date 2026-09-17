@@ -18,7 +18,7 @@ By default this example uses a **stub submitter** that returns a canned confirma
 
 ## Prerequisites
 
-- Node.js 20+ — on Node 20, installs may print `EBADENGINE` for some transitive deps that declare `engines.node >= 22`; install and stub runs still succeed. Node 22+ silences the warning.
+- Node.js 20+ — on Node 20 the install prints `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22`; install and stub runs still succeed, and Node 22+ silences it.
 - npm
 
 ## Quickstart
