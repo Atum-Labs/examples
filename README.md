@@ -31,7 +31,9 @@ Set the stub flag to `false` to settle for real over Atum's hosted testnet. The 
 | Service | URL |
 | --- | --- |
 | Payment Gateway (MPP settlement + x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
-| x402 facilitator | `https://x402-facilitator.production-testnet.atum.xyz` |
+| x402 facilitator | `https://payment-gw.production-testnet.atum.xyz/x402/v1` |
+
+Same host, two values: the gateway hosts the x402 facilitator under a `/x402/v1` prefix, and that prefix is part of `FACILITATOR_URL`.
 
 Atum supports many corridors ([supported assets](https://docs.atum.xyz/get-started/reference/supported-assets)); the one these examples ship wired to — and are hardened against — is **Base Sepolia USDC → Tempo (Moderato) pathUSD**. Real testnet funds move, so the payer wallet must be funded on the chain it spends from (the payers handle the Permit2 approval themselves). See each app's `.env.example` and `src/merchant.ts` for the exact values (and how to repoint the corridor).
 
