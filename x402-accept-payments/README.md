@@ -124,7 +124,7 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/v1/defaults` automatically — you never paste them by hand (verified: `/v1/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
 
 Two things to know when changing the corridor here:
 
@@ -135,7 +135,7 @@ The payer funds the payment (source token + gas) — see [`x402-make-payments`](
 
 ```
 Merchant listening on http://localhost:4020
-Facilitator: real https://x402-facilitator.production-testnet.atum.xyz · corridor from https://payment-gw.production-testnet.atum.xyz/defaults
+Facilitator: real https://x402-facilitator.production-testnet.atum.xyz · corridor from https://payment-gw.production-testnet.atum.xyz/v1/defaults
 → 402: no payment credential, issuing challenge
 → 402: still settling (payment pay_…) — awaiting the payer's re-attempt
 → 402: no payment credential, issuing challenge

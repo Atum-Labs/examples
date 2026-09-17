@@ -69,7 +69,7 @@ if (!USE_STUB_SUBMITTER && SECRET_KEY === DEFAULT_SECRET_KEY) {
 // What the merchant receives, the source it accepts, and the pricing/deadline budgets.
 // The corridor's contract addresses (escrow, reserver, releaser, fulfillment proxy,
 // verifier) are NOT configured here: against a real gateway they're fetched from
-// `/defaults` by `corridorFromDefaults`; the offline stub uses built-in placeholders.
+// `/v1/defaults` by `corridorFromDefaults`; the offline stub uses built-in placeholders.
 const DEST_NETWORK = process.env.DEST_NETWORK ?? "eip155:42431"; // Tempo Moderato
 const DEST_ASSET = process.env.DEST_ASSET ?? "0x20c0000000000000000000000000000000000000"; // Tempo pathUSD
 // Where the merchant gets paid on the destination chain. Use DEST_ADDRESS when it's a
@@ -282,7 +282,7 @@ function paymentIdOf(res: http.ServerResponse): string | undefined {
 
 async function main() {
   // Print BEFORE setup(). The static SDK imports above (~800KB through tsx) and,
-  // in real mode, setup()'s live gateway /defaults call are the slow part of boot,
+  // in real mode, setup()'s live gateway /v1/defaults call are the slow part of boot,
   // and until this line nothing was logged until both finished — so a slow boot and
   // a dead process looked identical to the smoke tests ("merchant output: <empty>").
   console.log(

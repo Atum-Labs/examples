@@ -33,7 +33,7 @@ Each app is a standalone npm package (no workspaces). The repo root has a thin o
 - **Key fulfilment on the receipt's `payment_id`, never on the request.** An identifier stops you being paid twice, not delivering twice. See `*/src/payments.ts`.
 - **Real settlement is opt-in and moves real testnet funds:** `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP), or `RUN_REAL_E2E=1 PRIVATE_KEY=… DEST_ADDRESS=… npm test`. Startup guards refuse the placeholder MPP secret and an invalid `DEST_ADDRESS` in real mode — keep those guards intact.
 - **Real settlement needs an `approve(Permit2)` per source token/chain** — both payers handle it via `ensureSourceApproval` when `RPC_URL` is set, so there is no manual step. Do not reintroduce one.
-- Corridor contract addresses come from the gateway's `GET /defaults` at startup — do not hardcode them.
+- Corridor contract addresses come from the gateway's `GET /v1/defaults` at startup — do not hardcode them.
 
 ## Conventions
 
