@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 // It does not verify signatures — that is the SDK's job. It only proves the
 // example completes the handshake end to end without a hosted gateway, funds,
 // or keys. Contract addresses are placeholders; a real prepare reads them from
-// GET /defaults on the live gateway instead.
+// GET /v1/defaults on the live gateway instead.
 
 const STUB_PAYMENT_ID = "pay_stub_0000000000000000";
 

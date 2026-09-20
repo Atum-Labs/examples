@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     console.log(`Preparing ${sourceAsset} → ${destinationAsset} via ${gatewayUrl} …`);
     console.log(`Request ${requestId} — to re-attempt it: REQUEST_ID=${requestId} npm run pay`);
 
-    // Corridor contract addresses come from GET /defaults. Supplying them here
+    // Corridor contract addresses come from GET /v1/defaults. Supplying them here
     // would let them drift from the gateway; the SDK fetches what we omit.
     const paymentRequest = await client.preparePaymentRequest({
       depositor,

@@ -91,14 +91,19 @@ npm test
 
 ## Settlement outcomes
 
-Cross-chain settlement can take longer than the gateway holds a connection open (~30s). Rather than hanging on, the facilitator answers with the payment id and the state it is in. x402 models settlement as a boolean, so everything short of settled arrives as `success: false`; `errorReason` separates three cases:
+Cross-chain settlement can take longer than the gateway holds a connection open (~30s). Rather than hanging on, the facilitator answers with the payment id and the state it is in. x402 models settlement as a boolean, so everything short of settled arrives as `success: false`; `errorReason` is what says which of them it was:
 
 | `errorReason` | What happened | What the payer should do |
 |---|---|---|
 | *(none — `success: true`)* | Settled | Nothing; the resource is served |
 | `settlement_pending` | Accepted, still settling | **Re-attempt the same purchase** — it resolves onto this payment |
 | `settlement_failed` | Terminal failure | **A new payment, under a new identifier** — this one can never settle |
+| `settlement_not_accepted` | Never taken up — no receipt and no payment id, so there is nothing to wait on | Nothing was charged and the identifier is unspent; pay the same purchase again once the cause is fixed |
 | a gateway code | Refused; nothing charged | Fix the request and pay the same purchase again |
+
+The table describes the settle **body**, which arrives on a `200` and also on a `400` — a request the facilitator could not read is answered in the same shape, with codes like `invalid_payload`. This merchant reads that body only on a `2xx` and throws on anything else, so a `400`'s code reaches the payer as a `502` rather than as a reason.
+
+A `5xx` is different in kind: the facilitator is declining to characterise the outcome at all, and its body carries `errorReason: unexpected_settle_error`. **It is not proof that nothing happened.** A settlement the network committed and then failed terminally on chain also arrives this way, with its payment id dropped — so after a `5xx` the payment's state is unknown from the response alone. Do not assume the identifier is still usable, and do not loop re-attempting; reconcile out of band before deciding. This example's payer stops on a `502` rather than re-attempting, so nothing loops on its own.
 
 Pending and failed demand **opposite** actions, so never collapse them into one "payment failed": reading pending as failed abandons a payment that was about to succeed and invites a second charge; reading failed as pending strands the payer retrying a dead payment. A pending payment is not served — goods must not be released against an unfinished payment — and this merchant sets `PAYMENT-RESPONSE` on those responses too, since that is the payer's only channel for `errorReason` and the payment id.
 
@@ -124,7 +129,9 @@ The shipped `.env.example` runs the stub. To settle for real against Atum's test
 1. `USE_STUB_FACILITATOR=false` — switch from the stub to the real facilitator.
 2. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/defaults` automatically — you never paste them by hand (verified: `/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+The active corridor is set in `.env.example` — **Base Sepolia USDC → Tempo pathUSD** by default. To reverse direction, comment that block and uncomment the alternative; it's the verified **Base ↔ Tempo** testnet corridor, copied from [Supported assets](https://docs.atum.xyz/get-started/reference/supported-assets) (EVM only, since this example signs with ethers + Permit2). The escrow, proxy, reserver, releaser, and verifier addresses are fetched from the gateway's `/v1/defaults` automatically — you never paste them by hand (verified: `/v1/defaults` returns exactly those addresses). Amount, markup, deadlines, and the facilitator/gateway URLs also have working testnet defaults (see the top of `src/merchant.ts`).
+
+The facilitator and the gateway are the same host: Atum serves the x402 facilitator from the payment gateway, with its three operations under a `/x402/v1` prefix so they stay versioned against the published facilitator contract rather than the gateway's own REST API. `FACILITATOR_URL` is a **base URL** — the merchant appends `/verify` and `/settle` to it — so that prefix belongs in the value, while `GATEWAY_URL` stays a bare host and gets `/defaults` appended.
 
 Two things to know when changing the corridor here:
 
@@ -135,7 +142,7 @@ The payer funds the payment (source token + gas) — see [`x402-make-payments`](
 
 ```
 Merchant listening on http://localhost:4020
-Facilitator: real https://x402-facilitator.production-testnet.atum.xyz · corridor from https://payment-gw.production-testnet.atum.xyz/defaults
+Facilitator: real https://payment-gw.production-testnet.atum.xyz/x402/v1 · corridor from https://payment-gw.production-testnet.atum.xyz/v1/defaults
 → 402: no payment credential, issuing challenge
 → 402: still settling (payment pay_…) — awaiting the payer's re-attempt
 → 402: no payment credential, issuing challenge

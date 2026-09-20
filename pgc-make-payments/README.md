@@ -10,7 +10,7 @@ There is no paired merchant. PGC is the direct gateway path (`prepare` → sign 
 
 The client handles the full payment flow automatically:
 
-1. Builds a payment request — corridor contract addresses come from the gateway's `GET /defaults`, not from config.
+1. Builds a payment request — corridor contract addresses come from the gateway's `GET /v1/defaults`, not from config.
 2. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the gateway settles. (In real mode the client also sends a one-off `approve(Permit2)` transaction if your allowance is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).)
 3. Submits the signed request.
 4. If settlement outruns the gateway's synchronous window, follows the **same request id** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
