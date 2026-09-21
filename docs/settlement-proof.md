@@ -40,7 +40,7 @@ This guide focuses on exercising that settlement on-chain, and verifying the res
 
 ## The self-serve proof
 
-Both protocols ship an opt-in real-settlement test, gated on `RUN_REAL_E2E=1` so it never runs by accident. Each one boots the real merchant against the hosted gateway/facilitator, drives a real payment with the client, and **asserts a genuine on-chain settlement — failing loudly if it detects the stub**, so it cannot give a false pass.
+Both protocols ship an opt-in real-settlement test, gated on `RUN_REAL_E2E=1` so it never runs by accident. From the repo root, [`npm run test:e2e`](../README.md#root-quickstart) sets that flag for you. Each suite boots the real merchant against the hosted gateway/facilitator, drives a real payment with the client, and **asserts a genuine on-chain settlement — failing loudly if it detects the stub**, so it cannot give a false pass.
 
 ### MPP (recommended)
 

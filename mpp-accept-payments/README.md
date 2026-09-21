@@ -66,7 +66,7 @@ This boots the merchant (in stub mode) and drives real payments against it using
 
 > This test drives the `mpp-make-payments` client too, so make sure you've also run `npm install` in [`../mpp-make-payments`](../mpp-make-payments) before running it.
 
-> The end-to-end test that settles against the live gateway is **opt-in** — it moves real testnet funds. Run it with a funded Base Sepolia wallet and a Tempo receiving address:
+> The end-to-end test that settles against the live gateway is **opt-in** — it moves real testnet funds. From the repo root, the [root quickstart](../README.md#root-quickstart) is `export PRIVATE_KEY` + `export DEST_ADDRESS` then `npm run test:e2e` (that script sets `RUN_REAL_E2E=1`). One app:
 >
 > ```bash
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test

@@ -77,7 +77,7 @@ cd ../x402-accept-payments && npm install
 npm test
 ```
 
-> The end-to-end test that settles against the live facilitator is **opt-in** — it moves real testnet funds. Run it with a funded wallet:
+> The end-to-end test that settles against the live facilitator is **opt-in** — it moves real testnet funds. From the repo root, the [root quickstart](../README.md#root-quickstart) is `export PRIVATE_KEY` + `export DEST_ADDRESS` then `npm run test:e2e` (that script sets `RUN_REAL_E2E=1`). One app:
 >
 > ```bash
 > RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test

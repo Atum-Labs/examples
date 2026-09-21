@@ -72,13 +72,13 @@ cp .env.example .env
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
+| `PRIVATE_KEY` | For real settlement | `export PRIVATE_KEY=0x…` in the shell, **or** uncomment it in `.env`. Shell wins if both are set. Leave it unset against the stub merchant. Do not write `PRIVATE_KEY=$PRIVATE_KEY` — dotenv does not expand that. The funded e2e suite never reads `.env`, so that path needs the shell export (see the [root quickstart](../README.md#root-quickstart)). |
 | `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 
 > `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
 
-> **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
+> **Where the key lives.** For `npm run pay`, `PRIVATE_KEY` can be in the shell (`export PRIVATE_KEY=0x…`) or in `.env`. `dotenv` does not override a variable already in the environment, so an exported key wins. `unset PRIVATE_KEY` when you want a stub run with a throwaway signer. `npm run test:e2e` does not read `.env` — that path needs the export; see the [root quickstart](../README.md#root-quickstart).
 
 ### 3. Run the client
 
@@ -115,7 +115,7 @@ This verifies the retry behavior described above against a server that fails a c
 
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor: `MERCHANT_URL=http://localhost:4030/paid` (the sibling merchant) and `RPC_URL=https://sepolia.base.org` (the Base Sepolia source chain) are already set. To pay for real:
 
-1. `PRIVATE_KEY=` — the payer wallet's key.
+1. `PRIVATE_KEY` — `export PRIVATE_KEY=0x…` in this shell, or uncomment it in `.env`.
 2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for the Permit2 approval's gas. With `RPC_URL` set, the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atumlabs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
 3. Point `MERCHANT_URL` elsewhere only if the merchant isn't the local default.
 

@@ -95,6 +95,33 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
 | `npm run typecheck` | `tsc --noEmit` across all four apps | — |
 
+### Root quickstart
+
+Real testnet funds move. `npm run test:e2e` sets `RUN_REAL_E2E=1` for you. **Export `PRIVATE_KEY` (and `DEST_ADDRESS`) in this shell** — the test suite does not read `.env`. (`npm run pay` can use the shell **or** `.env`; this path cannot.)
+
+```bash
+# Fund one EOA you control (same address on every EVM chain):
+#   Base Sepolia — Circle USDC (~0.06) + a little ETH for gas
+#   Tempo (both directions) —
+#     cast rpc tempo_fundAddress 0xYourWallet --rpc-url https://rpc.moderato.tempo.xyz
+
+export PRIVATE_KEY=0xYourOwnTestnetKey   # funded testnet key; unset it to go back to stub
+export DEST_ADDRESS=0xYourReceivingEOA   # where the merchant is paid; can be the same address
+
+npm run install:all                      # once
+npm run test:e2e                         # MPP + x402, both directions of Base ↔ Tempo
+# SKIP_REVERSE=1 npm run test:e2e        # forward leg only (Base → Tempo), one chain funded
+```
+
+One app, without the root script — then you **do** pass `RUN_REAL_E2E=1`:
+
+```bash
+cd x402-accept-payments   # or mpp-accept-payments
+RUN_REAL_E2E=1 PRIVATE_KEY=0x... DEST_ADDRESS=0x... npm test
+```
+
+Permit2 approval is automatic when the test sets `RPC_URL`. Details and faucets are in [Step 3](#step-3---funded-settlement--real-testnet-funds).
+
 ### Step 1 - Install
 
 ```bash
@@ -124,17 +151,12 @@ cast rpc tempo_fundAddress 0xYourWallet --rpc-url https://rpc.moderato.tempo.xyz
 
 **2. Approve Permit2 — handled for you.** Real settlement pulls your funds through Permit2, so each source token needs an `approve(Permit2)` per chain. Both payers do this themselves via `ensureSourceApproval` when `RPC_URL` is set: they read the current allowance and send an approval only if it falls short, so it happens once and is a no-op thereafter. The wallet just needs gas on the source chain.
 
-**3. Export your key and receiving address.**
-
-```bash
-export PRIVATE_KEY=0xYourOwnTestnetKey  # the wallet you funded above
-export DEST_ADDRESS=0xYourReceivingEOA  # your receiving address; used on whichever chain is the destination
-```
+**3. Put `PRIVATE_KEY` and `DEST_ADDRESS` in this shell** — see the [root quickstart](#root-quickstart). `npm run test:e2e` does not read `.env`. (`npm run pay` can use either.)
 
 **4. Run it.**
 
 ```bash
-npm run test:e2e
+npm run test:e2e    # sets RUN_REAL_E2E=1
 ```
 
 Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises both sides (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (typically 25–40s per leg) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. See the [settlement proof](docs/settlement-proof.md) to verify the result on-chain.

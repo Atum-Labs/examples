@@ -75,13 +75,13 @@ cp .env.example .env
 
 | Variable | Required | Description |
 |---|---|---|
-| `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
+| `PRIVATE_KEY` | For real settlement | `export PRIVATE_KEY=0x…` in the shell, **or** uncomment it in `.env`. Shell wins if both are set. Leave it unset against the stub merchant. The funded e2e suite never reads `.env`, so that path needs the shell export (see the [root quickstart](../README.md#root-quickstart)). |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
 
 > `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
 
-> **Switching wallets or environments?** If you previously exported `PRIVATE_KEY` in your shell (e.g. `export PRIVATE_KEY=0x…`), that value takes precedence over `.env` — `dotenv` does not replace variables already set in your environment. After editing `.env` you may silently keep signing with the old key. Run `unset PRIVATE_KEY` so the value from `.env` is used, then re-run the client.
+> **Where the key lives.** For `npm run pay`, `PRIVATE_KEY` can be in the shell (`export PRIVATE_KEY=0x…`) or in `.env`. `dotenv` does not override a variable already in the environment, so an exported key wins. `unset PRIVATE_KEY` when you want a stub run with a throwaway signer. `npm run test:e2e` does not read `.env` — that path needs the export; see the [root quickstart](../README.md#root-quickstart).
 
 ### 3. Run the client
 
@@ -115,7 +115,7 @@ This client is exercised end-to-end by the smoke test in [`../x402-accept-paymen
 
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor — the merchant's default. To pay a real (non-stub) merchant:
 
-1. `PRIVATE_KEY=` — the payer wallet's key.
+1. `PRIVATE_KEY` — `export PRIVATE_KEY=0x…` in this shell, or uncomment it in `.env`.
 2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for gas. For the reverse leg, also fund it on **Tempo** with `pathUSD` — that covers both the payment and gas, since Tempo has no native gas token (see the root README's `cast rpc tempo_fundAddress` faucet command).
 3. Set `RPC_URL=https://sepolia.base.org` (or the source chain you are paying from). The client then approves **Permit2** for you before signing, via `ensureSourceApproval` — the escrow pulls your funds through Permit2, so the approval has to exist or the deposit reverts at settlement. It reads the current allowance first and only sends a transaction when it falls short, so it is a no-op on later runs.
 
