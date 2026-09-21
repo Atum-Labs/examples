@@ -3,17 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Root orchestration for the Atum x402 & MPP examples. Each example is a standalone project; these scripts just install, typecheck, and test them all together.",
+  "description": "Root orchestration for the Atum x402, MPP, and Payment Gateway examples. Each example is a standalone project; these scripts just install, typecheck, and test them all together.",
   "scripts": {
-    "install:all": "npm install --prefix x402-make-payments && npm install --prefix mpp-make-payments && npm install --prefix x402-accept-payments && npm install --prefix mpp-accept-payments",
-    "ci:all": "npm ci --prefix x402-make-payments && npm ci --prefix mpp-make-payments && npm ci --prefix x402-accept-payments && npm ci --prefix mpp-accept-payments",
-    "typecheck": "npm --prefix x402-make-payments run typecheck && npm --prefix mpp-make-payments run typecheck && npm --prefix x402-accept-payments run typecheck && npm --prefix mpp-accept-payments run typecheck",
+    "install:all": "npm install --prefix x402-make-payments && npm install --prefix mpp-make-payments && npm install --prefix x402-accept-payments && npm install --prefix mpp-accept-payments && npm install --prefix pgc-make-payments",
+    "ci:all": "npm ci --prefix x402-make-payments && npm ci --prefix mpp-make-payments && npm ci --prefix x402-accept-payments && npm ci --prefix mpp-accept-payments && npm ci --prefix pgc-make-payments",
+    "typecheck": "npm --prefix x402-make-payments run typecheck && npm --prefix mpp-make-payments run typecheck && npm --prefix x402-accept-payments run typecheck && npm --prefix mpp-accept-payments run typecheck && npm --prefix pgc-make-payments run typecheck",
     "test": "npm run test:smoke",
-    "test:smoke": "npm --prefix x402-make-payments test && npm --prefix mpp-make-payments test && npm --prefix x402-accept-payments test && npm --prefix mpp-accept-payments test",
+    "test:smoke": "npm --prefix x402-make-payments test && npm --prefix mpp-make-payments test && npm --prefix x402-accept-payments test && npm --prefix mpp-accept-payments test && npm --prefix pgc-make-payments test",
     "test:smoke:pending": "STUB_PENDING_ATTEMPTS=2 npm run test:smoke",
-    "test:e2e": "npm run test:e2e:mpp; m=$?; npm run test:e2e:x402; x=$?; exit $(( m | x ))",
+    "test:e2e": "npm run test:e2e:mpp; m=$?; npm run test:e2e:x402; x=$?; npm run test:e2e:pgc; p=$?; exit $(( m | x | p ))",
     "test:e2e:mpp": "RUN_REAL_E2E=1 npm --prefix mpp-accept-payments test",
     "test:e2e:x402": "RUN_REAL_E2E=1 npm --prefix x402-accept-payments test",
+    "test:e2e:pgc": "USE_STUB_GATEWAY=false npm --prefix pgc-make-payments run pay",
     "test:all": "npm run test:smoke && npm run test:e2e"
   }
 }
