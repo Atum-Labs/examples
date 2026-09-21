@@ -11,9 +11,10 @@
     "test": "npm run test:smoke",
     "test:smoke": "npm --prefix x402-make-payments test && npm --prefix mpp-make-payments test && npm --prefix x402-accept-payments test && npm --prefix mpp-accept-payments test && npm --prefix pgc-make-payments test",
     "test:smoke:pending": "STUB_PENDING_ATTEMPTS=2 npm run test:smoke",
-    "test:e2e": "npm run test:e2e:mpp; m=$?; npm run test:e2e:x402; x=$?; exit $(( m | x ))",
+    "test:e2e": "npm run test:e2e:mpp; m=$?; npm run test:e2e:x402; x=$?; npm run test:e2e:pgc; p=$?; exit $(( m | x | p ))",
     "test:e2e:mpp": "RUN_REAL_E2E=1 npm --prefix mpp-accept-payments test",
     "test:e2e:x402": "RUN_REAL_E2E=1 npm --prefix x402-accept-payments test",
+    "test:e2e:pgc": "USE_STUB_GATEWAY=false npm --prefix pgc-make-payments run pay",
     "test:all": "npm run test:smoke && npm run test:e2e"
   }
 }

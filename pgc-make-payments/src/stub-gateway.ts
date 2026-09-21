@@ -27,8 +27,10 @@ const STUB_DEFAULTS = {
 };
 
 export interface StubGatewayOptions {
-  /** First N status checks report `pending`, then `completed`. Default: 0. */
+  /** First N status checks report `pending`, then terminal (`settleAs`). Default: 0. */
   pendingAttempts?: number;
+  /** The terminal status this payment settles to, once pendingAttempts is exhausted. Default: "completed". */
+  settleAs?: "completed" | "failed";
 }
 
 export interface StubGateway {
@@ -64,7 +66,18 @@ function confirmation(requestId: string) {
   };
 }
 
-function completedBody(requestId: string, replay: boolean) {
+// completed carries a fulfillment_confirmation; failed carries an error instead — mirrors
+// the real gateway, where a failed payment never reaches fulfillment.
+function terminalBody(requestId: string, replay: boolean, status: "completed" | "failed") {
+  if (status === "failed") {
+    return {
+      payment_id: STUB_PAYMENT_ID,
+      status: "failed",
+      idempotent_replay: replay,
+      quote_id: "quote_stub",
+      error: { code: "SETTLEMENT_FAILED", message: "stub: settlement forced to fail (settleAs)" },
+    };
+  }
   return {
     payment_id: STUB_PAYMENT_ID,
     status: "completed",
@@ -79,6 +92,7 @@ function completedBody(requestId: string, replay: boolean) {
  */
 export function startStubGateway(options: StubGatewayOptions = {}): Promise<StubGateway> {
   const pendingAttempts = options.pendingAttempts ?? 0;
+  const settleAs = options.settleAs ?? "completed";
   const submitted: string[] = [];
   const payments = new Map<string, { requestId: string; statusChecks: number }>();
 
@@ -106,7 +120,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
             200,
             pendingAttempts > 0 && existing.statusChecks < pendingAttempts
               ? { payment_id: STUB_PAYMENT_ID, status: "pending", idempotent_replay: true }
-              : completedBody(requestId, true),
+              : terminalBody(requestId, true, settleAs),
           );
           return;
         }
@@ -117,7 +131,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
           200,
           pendingAttempts > 0
             ? { payment_id: STUB_PAYMENT_ID, status: "pending", idempotent_replay: false }
-            : completedBody(requestId, false),
+            : terminalBody(requestId, false, settleAs),
         );
         return;
       }
@@ -135,11 +149,13 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
           send(res, 200, { payment_id: paymentId, status: "pending" });
           return;
         }
-        send(res, 200, {
-          payment_id: paymentId,
-          status: "completed",
-          fulfillment_confirmation: confirmation(payment.requestId),
-        });
+        send(
+          res,
+          200,
+          settleAs === "failed"
+            ? { payment_id: paymentId, status: "failed", error: { code: "SETTLEMENT_FAILED", message: "stub: settlement forced to fail (settleAs)" } }
+            : { payment_id: paymentId, status: "completed", fulfillment_confirmation: confirmation(payment.requestId) },
+        );
         return;
       }
 

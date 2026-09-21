@@ -11,7 +11,7 @@
     "test": "tsx --test src/*.test.ts"
   },
   "dependencies": {
-    "@atumlabs/payment-gateway-client": "file:./vendor/atum-labs-payment-gateway-client-2.2.0.tgz",
+    "@atumlabs/payment-gateway-client": "3.0.1",
     "dotenv": "^16.0.0",
     "ethers": "^6.13.0"
   },

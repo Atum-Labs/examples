@@ -50,7 +50,7 @@ Where authorized by Atum, the same examples run against mainnet: set the stub fl
 
 Confirm the `402 → pay → 200` wiring locally before touching funded settlement. **Stub mode needs no gateway, facilitator, funds, or keys** — the payer signs offline, so when `PRIVATE_KEY` is unset it generates a throwaway key for the run and prints the address.
 
-The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite. Until the v4 Payment Gateway client is published, `pgc-make-payments` installs a packed snapshot of that package from `protocol` rather than pinning a registry version that is about to go stale.
+The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
 
 ### Node.js
 
@@ -92,7 +92,7 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm run install:all` | `npm install` in all five apps | — |
 | `npm test` | Smoke tests for all five apps (alias for `test:smoke`) | None |
 | `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt / wait path | None |
-| `npm run test:e2e` | Real, funded settlement for x402 and MPP, **both directions** of the shipped corridor | Real testnet funds (both chains) |
+| `npm run test:e2e` | Real, funded settlement for x402, MPP, and PGC — x402/MPP against production-testnet (v3), PGC against staging-testnet (v4, until production-testnet is on v4) | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
 | `npm run typecheck` | `tsc --noEmit` across all five apps | — |
 
@@ -139,6 +139,8 @@ npm run test:e2e
 ```
 
 Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises both sides (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (typically 25–40s per leg) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. See the [settlement proof](docs/settlement-proof.md) to verify the result on-chain.
+
+PGC runs alongside them as a fifth real settlement (`npm run pay` against `USE_STUB_GATEWAY=false`). It has no merchant pair and settles against **staging-testnet**, not production-testnet — see [`pgc-make-payments`](pgc-make-payments) for why. Unlike the x402/MPP suites, PGC's real run is not wrapped in a test that skips quietly when `PRIVATE_KEY` is unset — it exits non-zero.
 
 **Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). A slow corridor needs no special handling — the payer re-attempts the purchase until it settles. To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs).
 

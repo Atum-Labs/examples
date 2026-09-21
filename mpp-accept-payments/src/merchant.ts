@@ -200,7 +200,7 @@ function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
       const result = await submitter.submit(request);
       if (result.fulfillment_confirmation) {
         logSettlement(result.fulfillment_confirmation);
-      } else if (result.status === "failed" || result.status === "cancelled") {
+      } else if (result.status === "failed") {
         console.log(
           `  payment ${result.payment_id} ${result.status} — terminal; paying for the same ` +
             `goods again needs a NEW purchase id`,

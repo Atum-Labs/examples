@@ -1,6 +1,6 @@
 # pgc-make-payments
 
-An example client that programmatically prepares, signs, and submits a payment through the Atum Payment Gateway using [`@atumlabs/payment-gateway-client`](https://github.com/Atum-Labs/protocol/tree/main/payment-gateway-client).
+An example client that programmatically prepares, signs, and submits a payment through the Atum Payment Gateway using [`@atumlabs/payment-gateway-client`](https://www.npmjs.com/package/@atumlabs/payment-gateway-client).
 
 There is no paired merchant. PGC is the direct gateway path (`prepare` → sign → submit → collect) — not an HTTP-gated `402` resource.
 
@@ -64,7 +64,7 @@ This example pays once per run, so it generates an identifier per run and prints
 npm install
 ```
 
-Until `@atumlabs/payment-gateway-client` publishes the v4-contracts SDK, this example installs a packed snapshot of the `protocol` package (`vendor/atum-labs-payment-gateway-client-2.2.0.tgz`) rather than pinning a registry version that is about to go stale. Refresh it from a protocol checkout with `pnpm --filter "@atum-labs/payment-gateway-client..." build && pnpm --filter @atum-labs/payment-gateway-client pack --pack-destination ../examples/pgc-make-payments/vendor`.
+This installs `@atumlabs/payment-gateway-client` from the public registry, pinned to the v4-contracts release this client is drafted against.
 
 ### 2. Configure environment
 
@@ -100,6 +100,11 @@ It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle fo
 Preparing eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e → eip155:42431/erc20:0x20c0000000000000000000000000000000000000 via http://127.0.0.1:… …
 Request pmt_f45bb75a9adc49258f64 — to re-attempt it: REQUEST_ID=pmt_f45bb75a9adc49258f64 npm run pay
   settled — payment pay_stub_0000000000000000
+{
+  "payment_id": "pay_stub_0000000000000000",
+  "status": "completed",
+  "confirmation": { ... }
+}
 ```
 
 To watch the wait that resolves a slow settlement, run with `STUB_PENDING_ATTEMPTS=2` — no funds, no gateway.
@@ -109,6 +114,8 @@ To watch the wait that resolves a slow settlement, run with `STUB_PENDING_ATTEMP
 The same package ships command-line tools. After `npm install` they are on `npx`. The interesting split is **prepare and sign, review, then submit** — the document `--prepare-only` writes is not a description of the payment, it *is* the payment.
 
 Widen the quote window if you intend to submit later, but only by tens of seconds. The default is 10s; an over-long window ends in a terminal `QUOTES_EXPIRED`. `--submit` signs nothing and needs no private key. Treat the prepared file like a signed cheque.
+
+`send-payment`'s exit code tells you the outcome without parsing output: `0` completed, `2` pending (follow up with `payment-status` or `--wait`), `3` failed (terminal — a retry needs a NEW `--request-id`), `1` unknown (bad args, unreachable gateway, or a request that may still have been accepted — re-run under the same `--request-id` to find out). This only describes a submitted payment; `--prepare-only`'s exit `0` just means the request was built and signed, not that anything was paid — don't chain a payment-conditional step off it.
 
 Real CLI commands talk to a live gateway (they are not the stub). These are pointed at **staging-testnet** until production-testnet is on v4. Replace the sender, destination, and key with your own; the corridor is the hardened Base Sepolia USDC → Tempo pathUSD path.
 
