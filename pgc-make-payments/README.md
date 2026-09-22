@@ -80,7 +80,7 @@ cp .env.example .env
 | `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet. Leave it unset against the stub and the client generates one per run. |
 | `DEST_ADDRESS` | For real settlement | Receiving address on the destination chain. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing. Leave blank against the stub. |
-| `GATEWAY_URL` | No | Real-mode gateway. Defaults to staging-testnet until production-testnet is on v4. |
+| `GATEWAY_URL` | No | Real-mode gateway. Defaults to the hosted testnet gateway. |
 
 > `REQUEST_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment.
 
@@ -117,13 +117,13 @@ Widen the quote window if you intend to submit later, but only by tens of second
 
 `send-payment`'s exit code tells you the outcome without parsing output: `0` completed, `2` pending (follow up with `payment-status` or `--wait`), `3` failed (terminal — a retry needs a NEW `--request-id`), `1` unknown (bad args, unreachable gateway, or a request that may still have been accepted — re-run under the same `--request-id` to find out). This only describes a submitted payment; `--prepare-only`'s exit `0` just means the request was built and signed, not that anything was paid — don't chain a payment-conditional step off it.
 
-Real CLI commands talk to a live gateway (they are not the stub). These are pointed at **staging-testnet** until production-testnet is on v4. Replace the sender, destination, and key with your own; the corridor is the hardened Base Sepolia USDC → Tempo pathUSD path.
+Real CLI commands talk to a live gateway (they are not the stub). Replace the sender, destination, and key with your own; the corridor is the hardened Base Sepolia USDC → Tempo pathUSD path.
 
 ```bash
 export PRIVATE_KEY=0xYourOwnTestnetKey
 export SENDER=0xYourPayerAddress
 export DEST=0xYourReceivingEOA
-export GATEWAY=https://payment-gw.staging-testnet.atumlabs.xyz
+export GATEWAY=https://payment-gw.production-testnet.atum.xyz
 export SOURCE=eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e
 export DESTINATION=eip155:42431/erc20:0x20c0000000000000000000000000000000000000
 ```
@@ -202,7 +202,7 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 
    Worth getting right up front: a deposit that reverts on-chain is a *terminal* settlement failure, and a terminal failure spends that request identifier for good.
 
-6. Leave `GATEWAY_URL` unset to use staging-testnet (`https://payment-gw.staging-testnet.atumlabs.xyz`), which is on the v4 contracts this client is drafted against. Point it at production-testnet only after that environment is on v4.
+6. Leave `GATEWAY_URL` unset to use the hosted testnet gateway (`https://payment-gw.production-testnet.atum.xyz`).
 
 On success the client prints the `payment_id` and fulfillment confirmation (source and destination transaction hashes). Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
 
