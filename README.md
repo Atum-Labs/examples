@@ -17,7 +17,7 @@ The examples run against three environments. Every merchant example defaults to 
 | Environment | Use it to | Settlement | Funds | Opt in with |
 | --- | --- | --- | --- | --- |
 | **Local (stub)** | Wire up and debug your integration | Simulated in-process | None | Default |
-| **Hosted testnet** (`production-testnet`) | Validate a real end-to-end payment | Real, on testnet rails | Testnet funds | `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP) / `USE_STUB_GATEWAY=false` (PGC; staging-testnet until prod is on v4) |
+| **Hosted testnet** (`production-testnet`) | Validate a real end-to-end payment | Real, on testnet rails | Testnet funds | `USE_STUB_FACILITATOR=false` (x402) / `USE_STUB_SUBMITTER=false` (MPP) / `USE_STUB_GATEWAY=false` (PGC) |
 | **Mainnet** | Go live (where authorized by Atum) | Real, on mainnet rails | Real funds | Stub flag `false` + Atum-provided production URLs |
 
 ### Local (stub)
@@ -26,13 +26,12 @@ The merchant examples and the PGC client default to stub mode. x402/MPP run the 
 
 ### Hosted testnet (`production-testnet`)
 
-Set the stub flag to `false` to settle for real. x402 and MPP ship pointed at production-testnet; PGC is pointed at **staging-testnet** until production-testnet is on the v4 contracts. The hosted endpoints:
+Set the stub flag to `false` to settle for real. All three examples ship pointed at production-testnet. The hosted endpoints:
 
 | Service | URL |
 | --- | --- |
-| Payment Gateway (MPP settlement + x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
+| Payment Gateway (MPP + PGC settlement, x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://payment-gw.production-testnet.atum.xyz/x402/v1` |
-| Payment Gateway (PGC real settlement, until prod is on v4) | `https://payment-gw.staging-testnet.atumlabs.xyz` |
 
 Same host for x402/MPP, two values: the gateway hosts the x402 facilitator under a `/x402/v1` prefix, and that prefix is part of `FACILITATOR_URL`.
 
@@ -92,7 +91,7 @@ Each example is a standalone project with its own tests, but the repo root has a
 | `npm run install:all` | `npm install` in all five apps | — |
 | `npm test` | Smoke tests for all five apps (alias for `test:smoke`) | None |
 | `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt / wait path | None |
-| `npm run test:e2e` | Real, funded settlement for x402, MPP, and PGC — x402/MPP against production-testnet (v3), PGC against staging-testnet (v4, until production-testnet is on v4) | Real testnet funds (both chains) |
+| `npm run test:e2e` | Real, funded settlement for x402, MPP, and PGC against production-testnet | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
 | `npm run typecheck` | `tsc --noEmit` across all five apps | — |
 
@@ -140,7 +139,7 @@ npm run test:e2e
 
 Each `accept` app spawns the **real** `make` client against the hosted facilitator/gateway, so this exercises both sides (payer *and* merchant) of each protocol, each direction — four real settlements. Each prints a heartbeat (`⏳ … still settling — Ns elapsed`) while it settles (typically 25–40s per leg) and, on success, a direction-tagged summary with the corridor, amount, and on-chain transaction links. See the [settlement proof](docs/settlement-proof.md) to verify the result on-chain.
 
-PGC runs alongside them as a fifth real settlement (`npm run pay` against `USE_STUB_GATEWAY=false`). It has no merchant pair and settles against **staging-testnet**, not production-testnet — see [`pgc-make-payments`](pgc-make-payments) for why. Unlike the x402/MPP suites, PGC's real run is not wrapped in a test that skips quietly when `PRIVATE_KEY` is unset — it exits non-zero.
+PGC runs alongside them as a fifth real settlement (`npm run pay` against `USE_STUB_GATEWAY=false`). It has no merchant pair — see [`pgc-make-payments`](pgc-make-payments). Unlike the x402/MPP suites, PGC's real run is not wrapped in a test that skips quietly when `PRIVATE_KEY` is unset — it exits non-zero.
 
 **Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). A slow corridor needs no special handling — the payer re-attempts the purchase until it settles. To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs).
 
