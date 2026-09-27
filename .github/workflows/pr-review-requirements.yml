@@ -1,0 +1,70 @@
+# owner: @atum-labs/core-team
+
+name: PR Review Requirements
+
+# Fails unless the PR has (1) an explicit human reviewer (a user, not a team)
+# and (2) at least one of the review-priority:* labels. Nothing else.
+
+on:
+  pull_request:
+    branches: [main]
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - labeled
+      - unlabeled
+      - review_requested
+      - review_request_removed
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-review-requirements-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# The two checks are separate jobs so both always run and report, even when
+# one of them fails.
+jobs:
+  human-reviewer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a human reviewer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Requested reviewers who have already submitted a review disappear
+          # from requested_reviewers, so count submitted human reviews too.
+          requested=$(gh api "repos/$REPO/pulls/$PR/requested_reviewers" \
+            --jq '[.users[] | select(.type == "User")] | length')
+          reviewed=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+            --jq '[.[] | select(.user.type == "User")] | length')
+          echo "Requested human reviewers: $requested; submitted human reviews: $reviewed"
+          if [ "$requested" -eq 0 ] && [ "$reviewed" -eq 0 ]; then
+            echo "::error::PR has no human reviewer. Request a review from a person (not a team)."
+            exit 1
+          fi
+
+  review-priority-label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a review-priority label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          matches=$(gh api "repos/$REPO/issues/$PR/labels" --paginate \
+            --jq '[.[].name | select(. == "review-priority:important"
+                                  or . == "review-priority:can-wait"
+                                  or . == "review-priority:blocking")] | length')
+          if [ "$matches" -eq 0 ]; then
+            echo "::error::PR is missing a review-priority label. Add one of review-priority:important, review-priority:can-wait, review-priority:blocking."
+            exit 1
+          fi
