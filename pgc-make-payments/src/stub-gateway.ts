@@ -37,6 +37,8 @@ export interface StubGateway {
   url: string;
   /** The request_id on each POST /v1/payments, in order. */
   submitted: () => string[];
+  /** The body of each POST /v1/payments, in order: what a real gateway would have been asked to settle. */
+  submittedRequests: () => Record<string, unknown>[];
   close: () => Promise<void>;
 }
 
@@ -94,6 +96,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
   const pendingAttempts = options.pendingAttempts ?? 0;
   const settleAs = options.settleAs ?? "completed";
   const submitted: string[] = [];
+  const submittedRequests: Record<string, unknown>[] = [];
   const payments = new Map<string, { requestId: string; statusChecks: number }>();
 
   const server: Server = createServer((req, res) => {
@@ -112,6 +115,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
         const body = raw === "" ? {} : (JSON.parse(raw) as { request_id?: string });
         const requestId = body.request_id ?? "(unnamed)";
         submitted.push(requestId);
+        submittedRequests.push(body);
 
         const existing = [...payments.values()].find((p) => p.requestId === requestId);
         if (existing) {
@@ -174,6 +178,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
       resolve({
         url: `http://127.0.0.1:${port}`,
         submitted: () => submitted.slice(),
+        submittedRequests: () => submittedRequests.map((request) => ({ ...request })),
         close: () =>
           new Promise<void>((closeResolve, closeReject) => {
             server.closeAllConnections();
