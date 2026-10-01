@@ -39,11 +39,19 @@ interface RunResult {
   output: string;
 }
 
+// The amount settings are read from the environment, so a developer shell that exports
+// either one would silently change what these cases test. Strip both from the inherited
+// environment and set only the ones a case names — "unset" has to mean absent, not "".
+const AMOUNT_VARS = ["FULFILLMENT_AMOUNT", "MAX_SOURCE_AMOUNT"] as const;
+
 function runClient(env: Record<string, string>): Promise<RunResult> {
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV };
+  for (const name of AMOUNT_VARS) delete childEnv[name];
+  Object.assign(childEnv, env);
   return new Promise((resolve, reject) => {
     const client = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], {
       cwd: CLIENT_DIR,
-      env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, ...env },
+      env: childEnv,
     });
     let output = "";
     client.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
@@ -141,6 +149,10 @@ test("a payment interrupted mid-poll is resumed via REQUEST_ID and hands back th
       REQUEST_ID: requestId,
     };
 
+    const firstEnv: NodeJS.ProcessEnv = { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV };
+    for (const name of AMOUNT_VARS) delete firstEnv[name];
+    Object.assign(firstEnv, sharedEnv);
+
     let firstOutput = "";
     await new Promise<void>((resolve, reject) => {
       // detached: true puts the child in its own process group, so we can kill that
@@ -150,7 +162,7 @@ test("a payment interrupted mid-poll is resumed via REQUEST_ID and hands back th
       // running for up to its full 120s wait budget after our own "kill" returns.
       const firstRun = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], {
         cwd: CLIENT_DIR,
-        env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, ...sharedEnv },
+        env: firstEnv,
         detached: true,
       });
       const onChunk = (chunk: Buffer) => {
@@ -241,4 +253,94 @@ test("exits with an error when PRIVATE_KEY is missing and USE_STUB_GATEWAY=false
     /PRIVATE_KEY is required in \.env for real settlement/,
     `expected the missing-key error:\n${result.output}`,
   );
+});
+
+function runStubWithAmounts(amounts: Partial<Record<(typeof AMOUNT_VARS)[number], string>>): Promise<RunResult> {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    DOTENV_CONFIG_PATH: NO_DOTENV,
+    ...STUB_ENV,
+    PRIVATE_KEY: randomPrivateKey(),
+  };
+  for (const name of AMOUNT_VARS) delete env[name];
+  Object.assign(env, amounts);
+  return new Promise((resolve, reject) => {
+    const client = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], { cwd: CLIENT_DIR, env });
+    let output = "";
+    client.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    client.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+    client.once("error", reject);
+    client.once("exit", (code) => resolve({ exitCode: code ?? 1, output }));
+  });
+}
+
+const SETTLED = /settled — payment pay_stub_/;
+
+// The spend cap is signed into the Permit2, so it must be a deliberate choice. Once the
+// payer moves off the default fulfillment amount, any cap derived for them would be a
+// guess about fees — refuse to run rather than sign one.
+test("a custom FULFILLMENT_AMOUNT without MAX_SOURCE_AMOUNT is refused before anything is signed", async () => {
+  const result = await runStubWithAmounts({ FULFILLMENT_AMOUNT: "60000" });
+  assert.notEqual(result.exitCode, 0, `expected a non-zero exit:\n${result.output}`);
+  assert.match(result.output, /MAX_SOURCE_AMOUNT/, `expected the error to name MAX_SOURCE_AMOUNT:\n${result.output}`);
+  assert.doesNotMatch(result.output, SETTLED, `a refused payment must not settle:\n${result.output}`);
+});
+
+// This spawns its own stub inside the client, so it proves the explicit pair is accepted
+// end to end; the verbatim test below checks the submitted body.
+test("a custom FULFILLMENT_AMOUNT with an explicit MAX_SOURCE_AMOUNT settles", async () => {
+  const result = await runStubWithAmounts({ FULFILLMENT_AMOUNT: "60000", MAX_SOURCE_AMOUNT: "60012" });
+  assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+  assert.match(result.output, SETTLED, `expected a settled payment:\n${result.output}`);
+});
+
+// The cap is an integer count of the source token's smallest units. Zero authorizes
+// nothing, a leading zero is ambiguous, and a decimal is a unit mix-up — each must be
+// rejected up front rather than signed.
+for (const malformed of ["abc", "0", "01", "1.5"]) {
+  test(`a malformed MAX_SOURCE_AMOUNT (${JSON.stringify(malformed)}) is rejected`, async () => {
+    const result = await runStubWithAmounts({ MAX_SOURCE_AMOUNT: malformed });
+    assert.notEqual(result.exitCode, 0, `expected a non-zero exit:\n${result.output}`);
+    assert.match(result.output, /MAX_SOURCE_AMOUNT/, `expected the error to name MAX_SOURCE_AMOUNT:\n${result.output}`);
+  });
+}
+
+// The cap the payer names must be the cap the gateway is asked to settle under — not one
+// the SDK re-derives on its own. 61000 is deliberately not what a fee-based derivation
+// from 60000 would produce, so only a client that forwards MAX_SOURCE_AMOUNT verbatim can
+// make the submitted body match. A shared stub is used because it is the only way to see
+// the submitted body from the test process.
+test("an explicit MAX_SOURCE_AMOUNT is submitted to the gateway verbatim as the spend cap", async () => {
+  const stub = await startStubGateway();
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      DOTENV_CONFIG_PATH: NO_DOTENV,
+      USE_STUB_GATEWAY: "false", // so the client points at OUR shared stub instead of spinning its own
+      GATEWAY_URL: stub.url,
+      RPC_URL: "",
+      DEST_ADDRESS: "0x0000000000000000000000000000000000000001",
+      PRIVATE_KEY: randomPrivateKey(),
+    };
+    for (const name of AMOUNT_VARS) delete env[name];
+    Object.assign(env, { FULFILLMENT_AMOUNT: "60000", MAX_SOURCE_AMOUNT: "61000" });
+
+    const result = await new Promise<RunResult>((resolve, reject) => {
+      const client = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], { cwd: CLIENT_DIR, env });
+      let output = "";
+      client.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      client.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+      client.once("error", reject);
+      client.once("exit", (code) => resolve({ exitCode: code ?? 1, output }));
+    });
+
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.match(result.output, SETTLED, `expected a settled payment:\n${result.output}`);
+    const requests = stub.submittedRequests();
+    assert.equal(requests.length, 1, `expected exactly one submission:\n${result.output}`);
+    assert.equal(requests[0].fulfillment_amount, "60000");
+    assert.equal(requests[0].max_source_amount, "61000");
+  } finally {
+    await stub.close();
+  }
 });

@@ -111,6 +111,26 @@ if (!USE_STUB_GATEWAY && !ADDRESS_RE.test(RAW_DEST_ADDRESS)) {
   process.exit(1);
 }
 
+// The spend cap the payer signs into the Permit2: the most the escrow may take from the source,
+// in the source token's smallest units. The default pairs with the default FULFILLMENT_AMOUNT
+// (50000 plus 2 bps). This example never derives a cap from another amount, because that needs
+// both tokens' decimals and a price; change one and you must state the other.
+const DEFAULT_MAX_SOURCE_AMOUNT = "50010";
+if (process.env.FULFILLMENT_AMOUNT !== undefined && process.env.MAX_SOURCE_AMOUNT === undefined) {
+  console.error(
+    "Error: MAX_SOURCE_AMOUNT is required when FULFILLMENT_AMOUNT is set: the most the payer authorizes " +
+      "from the source, in the source token's smallest units.",
+  );
+  process.exit(1);
+}
+const MAX_SOURCE_AMOUNT = process.env.MAX_SOURCE_AMOUNT ?? DEFAULT_MAX_SOURCE_AMOUNT;
+if (!/^[1-9][0-9]*$/.test(MAX_SOURCE_AMOUNT)) {
+  console.error(
+    `Error: MAX_SOURCE_AMOUNT must be a positive integer in the source token's smallest units, got "${MAX_SOURCE_AMOUNT}".`,
+  );
+  process.exit(1);
+}
+
 const privateKey = PRIVATE_KEY || ethers.Wallet.createRandom().privateKey;
 
 // Names the payment this run is submitting. The SDK requires it — it seeds the
@@ -177,7 +197,8 @@ async function maybeApproveSource(): Promise<void> {
     token: SOURCE_ASSET,
     owner: depositor,
     signer,
-    requiredAllowance: BigInt(FULFILLMENT_AMOUNT),
+    // The escrow can pull up to the cap, not just the fulfillment amount.
+    requiredAllowance: BigInt(MAX_SOURCE_AMOUNT),
   });
   console.log(
     result.alreadySufficient
@@ -207,6 +228,7 @@ async function main(): Promise<void> {
     const paymentRequest = await client.preparePaymentRequest({
       depositor,
       fulfillmentAmount: FULFILLMENT_AMOUNT,
+      maxSourceAmount: MAX_SOURCE_AMOUNT,
       sourceAsset,
       destinationAccount,
       destinationAsset,
