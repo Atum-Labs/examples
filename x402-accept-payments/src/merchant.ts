@@ -276,6 +276,56 @@ const STUB_CORRIDOR: CorridorContracts = {
   fulfillmentVerifierEndpoint: "http://localhost:8080/veri-fill",
 };
 
+// A payer checks the escrow and roles in a 402 against an Atum gateway it trusts before it
+// signs. Offline there is no gateway, so in stub mode this merchant answers that question
+// for its placeholder corridor itself, in the gateway's GET /v1/defaults shape. A real
+// merchant never does: the payer's trust source must not be the party being paid.
+//
+// Token metadata is looked up by address, so a token keeps its own symbol and decimals in
+// whichever direction the corridor runs. The stub vouches only for tokens it knows: an
+// asset missing here is left out of its answer, and a payer then refuses the payment
+// rather than computing its spend cap on guessed decimals. Add a token here to run the
+// stub against it.
+interface StubChainDefaults {
+  chain_id: string;
+  escrow_contract: string;
+  quote_selector: string;
+  fulfillment_proxy: string;
+  fulfillment_verifier: { account: string; endpoint: string };
+  tokens: { symbol: string; address: string; decimals: number }[];
+}
+
+const STUB_KNOWN_TOKENS = new Map<string, { symbol: string; decimals: number }>([
+  ["0x036cbd53842c5426634e7929541ec2318f3dcf7e", { symbol: "USDC", decimals: 6 }], // Base Sepolia
+  ["0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", { symbol: "USDC", decimals: 6 }], // Base
+  ["0x20c0000000000000000000000000000000000000", { symbol: "pathUSD", decimals: 6 }], // Tempo
+]);
+
+function stubToken(address: string): StubChainDefaults["tokens"][number] | undefined {
+  const known = STUB_KNOWN_TOKENS.get(address.toLowerCase());
+  return known && { ...known, address };
+}
+
+function stubChainDefaults(chainId: string): StubChainDefaults | undefined {
+  if (chainId !== SOURCE_NETWORK && chainId !== DEST_NETWORK) return undefined;
+  const assets = [
+    ...(chainId === SOURCE_NETWORK ? [SOURCE_ASSET] : []),
+    ...(chainId === DEST_NETWORK ? [DEST_ASSET] : []),
+  ];
+  const tokens = assets.flatMap((asset) => stubToken(asset) ?? []);
+  return {
+    chain_id: chainId,
+    escrow_contract: STUB_CORRIDOR.escrow,
+    quote_selector: STUB_CORRIDOR.reserver,
+    fulfillment_proxy: STUB_CORRIDOR.fulfillmentProxy,
+    fulfillment_verifier: {
+      account: STUB_CORRIDOR.releaser,
+      endpoint: STUB_CORRIDOR.fulfillmentVerifierEndpoint,
+    },
+    tokens,
+  };
+}
+
 async function resolveCorridor(): Promise<CorridorContracts> {
   if (USE_STUB_FACILITATOR) return STUB_CORRIDOR;
 
@@ -457,6 +507,18 @@ function buildApp(requirements: PaymentRequirements): express.Express {
   app.use(express.json());
 
   const ledger = new PaymentLedger<typeof RESOURCE_BODY>();
+
+  if (USE_STUB_FACILITATOR) {
+    app.get("/v1/defaults", (req: Request, res: Response) => {
+      const chainId = req.query.chain_id;
+      const defaults = typeof chainId === "string" ? stubChainDefaults(chainId) : undefined;
+      if (!defaults) {
+        res.status(404).json({ error: "this stub serves only its own corridor's chains" });
+        return;
+      }
+      res.json(defaults);
+    });
+  }
 
   app.get("/paid", async (req: Request, res: Response) => {
     // Express lower-cases header names. Read the v2 header, then fall back to v1.
