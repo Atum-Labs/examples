@@ -19,6 +19,10 @@ By default this example uses a **stub** that runs the full `402 → pay → 200`
 
 In stub mode, steps 4–5 are short-circuited in-process with a canned success — nothing settles and no funds move.
 
+Before it signs, the payer checks the escrow and roles in the 402 against an Atum gateway it trusts (`GET /v1/defaults`). Offline there is no gateway, so in stub mode the merchant also answers `GET /v1/defaults?chain_id=…` for its own placeholder corridor; point the payer's `GATEWAY_URL` at the merchant to run the stub flow. In real mode the merchant serves no such route: a payer's trust source must never be the party being paid.
+
+The payer also bounds what it will sign: by default it refuses a spend cap more than 500 bps (5%) above `FULFILLMENT_AMOUNT`, so keep `MARKUP_BPS` at or below 500 unless your payers raise their limit.
+
 ## Prerequisites
 
 - Node.js 20+
@@ -57,7 +61,7 @@ Facilitator: stub (local, no funds)
 
 ### 4. Try a payment
 
-Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
+Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`GATEWAY_URL=http://localhost:4020 npm run pay` after this merchant is up, so the payer's trust check asks this stub) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
 
 ## Testing
 

@@ -214,9 +214,21 @@ test("the readiness pattern still matches the merchant's own banner", () => {
 
 const STUB_ENV = { USE_STUB_FACILITATOR: "true" };
 
+// The stub corridor exists nowhere but in the stub merchant, which answers /v1/defaults
+// for it at its own origin — so that origin is the trust source a stub-mode payer checks
+// the 402 against.
+function stubGateway(merchantUrl: string): string {
+  return new URL(merchantUrl).origin;
+}
+
 test("stub flow: 402 -> pay -> 200", async () => {
   await withMerchant(4088, STUB_ENV, async ({ url }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
     assertPaid(result, "client");
   });
 });
@@ -225,7 +237,12 @@ test("concurrent payments from different wallets all succeed", async () => {
   await withMerchant(4087, STUB_ENV, async ({ url }) => {
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
-        runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" }),
+        runClient({
+          PRIVATE_KEY: randomPrivateKey(),
+          MERCHANT_URL: url,
+          RPC_URL: "",
+          GATEWAY_URL: stubGateway(url),
+        }),
       ),
     );
     results.forEach((result, i) => assertPaid(result, `client ${i}`));
@@ -236,7 +253,12 @@ test("the same wallet can pay more than once in sequence", async () => {
   await withMerchant(4086, STUB_ENV, async ({ url, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
-      const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
+      const result = await runClient({
+        PRIVATE_KEY: key,
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: stubGateway(url),
+      });
       assertPaid(result, `payment ${i + 1}`);
     }
     // Each run names a new purchase, so these are three distinct payments — not one
@@ -253,7 +275,12 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
   // The stub reports the first attempt as still settling, as the facilitator does when
   // cross-chain settlement outruns the gateway's ~30s synchronous window.
   await withMerchant(4084, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
     assertPaid(result, "client");
     assert.match(
       output(),
@@ -275,6 +302,7 @@ test("re-attempting a fulfilled purchase re-serves it instead of delivering twic
         PRIVATE_KEY: key,
         MERCHANT_URL: url,
         RPC_URL: "",
+        GATEWAY_URL: stubGateway(url),
         PURCHASE_ID: purchaseId,
       });
       assertPaid(result, label);
@@ -667,6 +695,80 @@ test("a real-mode merchant never answers /v1/defaults for its own corridor", asy
       const res = await fetch(defaultsUrl(url, env.SOURCE_NETWORK));
       assert.equal(res.status, 404, `a real merchant must not serve /v1/defaults:\n${await res.text()}`);
     });
+  });
+});
+
+// A trust source that repeats the stub merchant's own /v1/defaults answer for every chain
+// but vouches for a different escrow. Mirroring the merchant keeps every other anchor and
+// every token identical to its 402, so the escrow is the only thing a payer can object to.
+// Bound to an OS-assigned port so it can never collide with a merchant port.
+async function withSkewedGateway(
+  merchantUrl: string,
+  escrow: string,
+  fn: (gatewayUrl: string) => Promise<void>,
+): Promise<void> {
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://localhost");
+    const chainId = u.searchParams.get("chain_id");
+    if (u.pathname !== "/v1/defaults" || !chainId) {
+      res.writeHead(404).end();
+      return;
+    }
+    void fetch(defaultsUrl(merchantUrl, chainId)).then(
+      async (upstream) => {
+        if (upstream.status !== 200) {
+          res.writeHead(upstream.status).end(await upstream.text());
+          return;
+        }
+        const d = (await upstream.json()) as GatewayDefaults;
+        res.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({ ...d, escrow_contract: escrow }),
+        );
+      },
+      (err: unknown) => res.writeHead(502).end(String(err)),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+// A 402 is written by the party being paid, so the payer must check it against a trust
+// source the merchant does not control before signing. The same merchant is then paid
+// with its own defaults as the trust source, so the refusal can only be the trust check
+// and not a broken setup.
+test("the payer refuses the stub merchant when its trust source does not vouch for the stub corridor", async () => {
+  await withMerchant(4100, STUB_ENV, async ({ url, output }) => {
+    const offer = await fetchOffer(url);
+    const untrustedEscrow = "0x0000000000000000000000000000000000000bad";
+    // Guard the premise: the skew only means something if it differs from the 402.
+    assert.notEqual(offer.extra.atum.escrow.toLowerCase(), untrustedEscrow);
+
+    await withSkewedGateway(url, untrustedEscrow, async (gatewayUrl) => {
+      const refused = await runClient({
+        PRIVATE_KEY: randomPrivateKey(),
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: gatewayUrl,
+      });
+      assert.notEqual(refused.exitCode, 0, `expected the payer to refuse:\n${refused.output}`);
+      assert.match(refused.output, /extra\.atum\.escrow/, `expected the refusal to name the field:\n${refused.output}`);
+      assert.match(refused.output, /not trusted/, `expected an untrusted-escrow refusal:\n${refused.output}`);
+    });
+    assert.doesNotMatch(output(), /→ 200:/, `the merchant must not have served the refused run:\n${output()}`);
+
+    const paid = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
+    assertPaid(paid, "client trusting the stub merchant's own defaults");
   });
 });
 

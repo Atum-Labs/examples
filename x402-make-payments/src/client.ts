@@ -7,11 +7,16 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { x402Client } from "@x402/fetch";
-import { registerAtumEscrowScheme, ensureSourceApproval } from "@atumlabs/x402-atum-escrow/client";
+import {
+  registerAtumEscrowScheme,
+  ensureSourceApproval,
+  atumGatewayTrust,
+} from "@atumlabs/x402-atum-escrow/client";
 import { wrapFetchWithAtumPayment } from "@atumlabs/x402-atum-escrow/fetch";
 import { payPurchase } from "./purchase.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
+  process.env;
 
 // A stub run needs a well-formed key, not a funded one: the payment is signed offline and
 // never touches a chain. So rather than stop a first run to go and produce a key, generate
@@ -53,8 +58,18 @@ if (!PRIVATE_KEY) {
   console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
 }
 
+// Before signing, the client checks the escrow and roles the merchant's 402 names against
+// an Atum gateway this payer trusts, and refuses a payment through any other. Which gateway
+// is the payer's choice and never comes from the 402: Atum's production gateways by default,
+// or GATEWAY_URL — a local devnet, or the stub merchant, which answers for its own
+// placeholder corridor.
+// An empty GATEWAY_URL (a blank line in .env) means unset, both here and in the SDK.
+const gatewayUrl = GATEWAY_URL || undefined;
+const trust = gatewayUrl ? atumGatewayTrust({ gateways: [gatewayUrl] }) : undefined;
+console.log(`Trusting the corridors vouched for by ${gatewayUrl ?? "Atum's production gateways"}.`);
+
 const client = new x402Client();
-registerAtumEscrowScheme(client, { signer: wallet });
+registerAtumEscrowScheme(client, { signer: wallet, ...(trust ? { trust } : {}) });
 
 /**
  * Refuse to approve on a different chain than the one the payment names.
@@ -126,7 +141,8 @@ if (RPC_URL) {
 const pay = wrapFetchWithAtumPayment(fetch, client);
 
 console.log(`Requesting ${MERCHANT_URL} …`);
-console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
+const gatewayPrefix = gatewayUrl ? `GATEWAY_URL=${gatewayUrl} ` : "";
+console.log(`Purchase ${purchaseId} — to re-attempt it: ${gatewayPrefix}PURCHASE_ID=${purchaseId} npm run pay`);
 
 try {
   // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
