@@ -75,10 +75,10 @@ npm run dev
 
 ```bash
 cd x402-make-payments
-npm run pay
+ATUM_TRUST_GATEWAYS=http://localhost:4020 npm run pay
 ```
 
-You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
+You should see a generated payer address, then `Status: 200` and `Access granted`. `ATUM_TRUST_GATEWAYS` points the payer's corridor trust check at the stub merchant, which vouches for its own placeholder addresses; without it the payer checks them against Atum's production gateways and refuses to sign (see [`x402-make-payments`](x402-make-payments#trusted-corridors)). MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
 
 Set `PRIVATE_KEY` in `.env` (copied from `.env.example`) when you move to real settlement — see [Environments](#environments).
 
@@ -143,7 +143,7 @@ PGC runs alongside them as a fifth real settlement (`npm run pay` against `USE_S
 
 **Options.** Set `SKIP_REVERSE=1` to run the forward leg only (a quick check, or a wallet funded on just one chain). A slow corridor needs no special handling — the payer re-attempts the purchase until it settles. To run one app alone, `cd` into it and `npm test` (add `RUN_REAL_E2E=1` for the funded legs).
 
-`.env` configures the apps you start **by hand** (`npm run dev`, `npm run pay`). The test suites deliberately do not read it, so a `.env` left over from local work cannot change what a funded run settles — set these in your **shell** instead: `FACILITATOR_URL`, `GATEWAY_URL`, the corridor (`SOURCE_NETWORK`, `SOURCE_ASSET`, `DEST_NETWORK`, `DEST_ASSET`), and each leg's source-chain RPC (`RPC_URL` forward, `REVERSE_RPC_URL` reverse). All default to the shipped corridor, and each leg prints the corridor it is about to settle before any funds move.
+`.env` configures the apps you start **by hand** (`npm run dev`, `npm run pay`). The test suites deliberately do not read it, so a `.env` left over from local work cannot change what a funded run settles — set these in your **shell** instead: `FACILITATOR_URL`, `GATEWAY_URL`, the corridor (`SOURCE_NETWORK`, `SOURCE_ASSET`, `DEST_NETWORK`, `DEST_ASSET`), each leg's source-chain RPC (`RPC_URL` forward, `REVERSE_RPC_URL` reverse), and the x402 payer's trust source (`ATUM_TRUST_GATEWAYS`, `ATUM_PEG_SYMBOLS`; unset trusts Atum's production gateways). All default to the shipped corridor, and each leg prints the corridor it is about to settle before any funds move.
 
 > **Other corridors:** Base ↔ Tempo is what these examples are hardened against and wired to out of the box. Atum supports [other corridors](https://docs.atum.xyz/get-started/reference/supported-assets) — export the variables above to exercise one (`.env` is for the by-hand `npm run dev`); see [`settlement-proof.md`](docs/settlement-proof.md). Two values don't follow the corridor: each leg's RPC must point at that leg's own **source** chain, and `FULFILLMENT_AMOUNT` is atomic units for a **6-decimal** token. PGC (`pgc-make-payments`) also needs `MAX_SOURCE_AMOUNT` whenever `FULFILLMENT_AMOUNT` is exported: the most the payer authorizes from the source, in atomic units of the **source** token. The client never derives it, because that needs both tokens' decimals and a price.
 

@@ -139,6 +139,8 @@ function runClient(env: Record<string, string>): Promise<RunResult> {
 
 interface MerchantHandle {
   url: string;
+  /** The merchant's origin. The stub serves its corridor's GET /v1/defaults there. */
+  origin: string;
   output(): string;
 }
 
@@ -168,7 +170,8 @@ async function withMerchant(
 
   try {
     await waitForListening(merchant, port, () => output);
-    const body = fn({ url: `http://localhost:${port}/paid`, output: () => output });
+    const origin = `http://localhost:${port}`;
+    const body = fn({ url: `${origin}/paid`, origin, output: () => output });
     // If the merchant dies while the body runs, fail with its output rather than leaving
     // the body to hit a bare connection error with nothing to explain it.
     const died = new Promise<never>((_, reject) =>
@@ -213,18 +216,28 @@ test("the readiness pattern still matches the merchant's own banner", () => {
 
 const STUB_ENV = { USE_STUB_FACILITATOR: "true" };
 
+// The payer refuses to sign a corridor its trust source does not vouch for, and the stub's
+// placeholder corridor is vouched for only by the stub's own GET /v1/defaults. Point the
+// payer there, and clear ATUM_PEG_SYMBOLS so an exported value cannot leak in.
+const stubPayerEnv = (origin: string) => ({ ATUM_TRUST_GATEWAYS: origin, ATUM_PEG_SYMBOLS: "" });
+
 test("stub flow: 402 -> pay -> 200", async () => {
-  await withMerchant(4088, STUB_ENV, async ({ url }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+  await withMerchant(4088, STUB_ENV, async ({ url, origin }) => {
+    const result = await runClient({
+      ...stubPayerEnv(origin),
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+    });
     assertPaid(result, "client");
   });
 });
 
 test("concurrent payments from different wallets all succeed", async () => {
-  await withMerchant(4087, STUB_ENV, async ({ url }) => {
+  await withMerchant(4087, STUB_ENV, async ({ url, origin }) => {
     const results = await Promise.all(
       Array.from({ length: 5 }, () =>
-        runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" }),
+        runClient({ ...stubPayerEnv(origin), PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" }),
       ),
     );
     results.forEach((result, i) => assertPaid(result, `client ${i}`));
@@ -232,10 +245,10 @@ test("concurrent payments from different wallets all succeed", async () => {
 });
 
 test("the same wallet can pay more than once in sequence", async () => {
-  await withMerchant(4086, STUB_ENV, async ({ url, output }) => {
+  await withMerchant(4086, STUB_ENV, async ({ url, origin, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
-      const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
+      const result = await runClient({ ...stubPayerEnv(origin), PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
       assertPaid(result, `payment ${i + 1}`);
     }
     // Each run names a new purchase, so these are three distinct payments — not one
@@ -251,8 +264,13 @@ test("the same wallet can pay more than once in sequence", async () => {
 test("a still-settling payment is collected by the payer's re-attempt", async () => {
   // The stub reports the first attempt as still settling, as the facilitator does when
   // cross-chain settlement outruns the gateway's ~30s synchronous window.
-  await withMerchant(4084, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+  await withMerchant(4084, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, origin, output }) => {
+    const result = await runClient({
+      ...stubPayerEnv(origin),
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+    });
     assertPaid(result, "client");
     assert.match(
       output(),
@@ -263,7 +281,7 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
 });
 
 test("re-attempting a fulfilled purchase re-serves it instead of delivering twice", async () => {
-  await withMerchant(4083, STUB_ENV, async ({ url, output }) => {
+  await withMerchant(4083, STUB_ENV, async ({ url, origin, output }) => {
     // The same purchase paid twice — what a payer does when it never received the first
     // 200, and what happens when one identifier is reused across two purchases. Both
     // resolve to one payment, so the merchant must deliver once.
@@ -271,6 +289,7 @@ test("re-attempting a fulfilled purchase re-serves it instead of delivering twic
     const key = randomPrivateKey();
     for (const label of ["first", "re-attempt"]) {
       const result = await runClient({
+        ...stubPayerEnv(origin),
         PRIVATE_KEY: key,
         MERCHANT_URL: url,
         RPC_URL: "",
@@ -519,6 +538,18 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
   );
 }
 
+// The payer's trust source, forwarded from the exported environment. Unset, the payer trusts
+// Atum's production gateways, which is right for the hosted testnet; a run against staging or
+// a devnet exports ATUM_TRUST_GATEWAYS (and ATUM_PEG_SYMBOLS for test-token stand-ins).
+function realTrustEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const name of ["ATUM_TRUST_GATEWAYS", "ATUM_PEG_SYMBOLS"]) {
+    const value = process.env[name]?.trim();
+    if (value) env[name] = value;
+  }
+  return env;
+}
+
 async function runRealSettlement(dir: Direction, port: number): Promise<void> {
   const privateKey = process.env.PRIVATE_KEY as string;
 
@@ -544,7 +575,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
     // the other direction can't leak in and point the approval at the wrong chain.
     const result = await withHeartbeat(`x402 real settlement (${corridorLabel(dir)})`, () =>
-      runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
+      runClient({ ...realTrustEnv(), PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
     );
 
     const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Access granted/.test(result.output);

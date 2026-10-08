@@ -57,7 +57,9 @@ Facilitator: stub (local, no funds)
 
 ### 4. Try a payment
 
-Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
+Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`ATUM_TRUST_GATEWAYS=http://localhost:4020 npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
+
+The payer checks the 402's corridor addresses against a trust source it controls before signing anything. The stub's addresses are placeholders, so in stub mode this merchant also answers `GET /v1/defaults?chain_id=…` with its own corridor and tokens, and `ATUM_TRUST_GATEWAYS` points the payer at it. Real mode serves no such route: there the payer trusts Atum's gateways, never the merchant.
 
 ## Testing
 
@@ -65,7 +67,7 @@ Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-
 npm test
 ```
 
-This boots the merchant (stub mode) and drives real payments against it using the `x402-make-payments` client, then checks for a successful `200`. It also covers concurrent payments from different wallets, the same wallet paying more than once, and the server refusing to start when it's misconfigured for real settlement.
+This boots the merchant (stub mode) and drives real payments against it using the `x402-make-payments` client, then checks for a successful `200`. The client is run with `ATUM_TRUST_GATEWAYS` set to the stub merchant, so its corridor trust check runs for real against the stub's `/v1/defaults`. It also covers concurrent payments from different wallets, the same wallet paying more than once, and the server refusing to start when it's misconfigured for real settlement.
 
 The test drives the `x402-make-payments` client, which depends on `@atumlabs/x402-atum-escrow`. The suite runs **locally**, not in public CI.
 
@@ -86,6 +88,8 @@ npm test
 > The payer approves **Permit2** for each source token itself (`ensureSourceApproval`), so there is no manual setup step — just make sure the wallet has gas on the source chain. Note this test settles **both directions** by default, so the wallet needs funds *and* an approval on Tempo as well — add `SKIP_REVERSE=1` to run the forward (Base → Tempo) leg only. It asserts an on-chain settlement and fails loudly if it detects the stub. For the full self-serve walkthrough (both protocols) and independent on-chain verification, see [Settlement proof](../docs/settlement-proof.md).
 >
 > **To settle a different corridor,** set `SOURCE_NETWORK` / `SOURCE_ASSET` / `DEST_NETWORK` / `DEST_ASSET` and each leg's source-chain RPC (`RPC_URL` forward, `REVERSE_RPC_URL` reverse) in your **shell**, not in `.env`. `.env` configures the merchant you start by hand with `npm run dev` (see [Going to testnet / mainnet](#going-to-testnet--mainnet)); this test suite does not read it, so a leftover `.env` cannot change what it settles. Each leg prints its corridor before funds move.
+>
+> **Against staging or a devnet,** also export the payer's trust source: `ATUM_TRUST_GATEWAYS` (that deployment's gateway URL) and, if its tokens are test stand-ins, `ATUM_PEG_SYMBOLS` (see [`x402-make-payments`](../x402-make-payments#trusted-corridors)). The test forwards both to the payer. Unset, the payer trusts Atum's production gateways, which is right for the hosted testnet.
 >
 > **A slow corridor needs nothing special.** When settlement outruns the gateway's synchronous window (~30s), the facilitator reports the payment as still settling and the payer re-attempts the same purchase until it has a terminal outcome — so the funded run settles either way. See [Settlement outcomes](#settlement-outcomes).
 

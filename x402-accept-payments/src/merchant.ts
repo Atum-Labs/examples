@@ -240,7 +240,9 @@ const SETTLEMENT_FAILED = "settlement_failed";
 // reserver (quote_selector), and the releaser + verifier endpoint (fulfillment_verifier);
 // the destination chain supplies the fulfillment proxy.
 //
-// The stub never checks these, so stub mode uses inert placeholders and contacts no gateway.
+// The stub facilitator never checks these, so stub mode uses inert placeholders and contacts
+// no gateway. The payer still checks them against a trust source before signing, so the stub
+// also serves its own GET /v1/defaults (see stubDefaults) for a payer pointed at it.
 // ---------------------------------------------------------------------------
 
 interface CorridorContracts {
@@ -259,6 +261,12 @@ interface ChainDefaults {
   fulfillment_verifier: { account: string; endpoint: string };
 }
 
+// What the stub serves, which is also what the payer's trust check reads.
+interface StubChainDefaults extends ChainDefaults {
+  chain_id: string;
+  tokens: { symbol: string; address: string; decimals: number }[];
+}
+
 async function fetchDefaults(chainId: string): Promise<ChainDefaults> {
   const res = await fetch(`${GATEWAY_URL}/v1/defaults?chain_id=${encodeURIComponent(chainId)}`);
   if (!res.ok) {
@@ -275,6 +283,42 @@ const STUB_CORRIDOR: CorridorContracts = {
   releaser: "0x0000000000000000000000000000000000000005",
   fulfillmentVerifierEndpoint: "http://localhost:8080/veri-fill",
 };
+
+// Symbols the stub vouches for. The payer only signs when both tokens are the same money
+// (same symbol, or pegged 1:1), so an unlisted token is presented as USDC.
+const STUB_TOKEN_SYMBOLS: Record<string, string> = {
+  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC", // Base Sepolia
+  "0x20c0000000000000000000000000000000000000": "pathUSD", // Tempo
+};
+
+// The stub's answer to GET /v1/defaults for one chain: the placeholder corridor plus the
+// tokens its 402 names on that chain, so a payer trusting this merchant can sign the stub
+// 402. Only the stub serves this; a real merchant never vouches for its own corridor.
+function stubDefaults(chainId: string): StubChainDefaults | undefined {
+  const tokens = [
+    { network: SOURCE_NETWORK, address: SOURCE_ASSET },
+    { network: DEST_NETWORK, address: DEST_ASSET },
+  ]
+    .filter((t) => t.network === chainId)
+    .map((t) => ({
+      symbol: STUB_TOKEN_SYMBOLS[t.address.toLowerCase()] ?? "USDC",
+      address: t.address,
+      // FULFILLMENT_AMOUNT and the cap are sized for a 6-decimal token.
+      decimals: 6,
+    }));
+  if (tokens.length === 0) return undefined;
+  return {
+    chain_id: chainId,
+    escrow_contract: STUB_CORRIDOR.escrow,
+    fulfillment_proxy: STUB_CORRIDOR.fulfillmentProxy,
+    quote_selector: STUB_CORRIDOR.reserver,
+    fulfillment_verifier: {
+      account: STUB_CORRIDOR.releaser,
+      endpoint: STUB_CORRIDOR.fulfillmentVerifierEndpoint,
+    },
+    tokens,
+  };
+}
 
 async function resolveCorridor(): Promise<CorridorContracts> {
   if (USE_STUB_FACILITATOR) return STUB_CORRIDOR;
@@ -458,6 +502,19 @@ function buildApp(requirements: PaymentRequirements): express.Express {
 
   const ledger = new PaymentLedger<typeof RESOURCE_BODY>();
 
+  if (USE_STUB_FACILITATOR) {
+    // Lets a payer run with ATUM_TRUST_GATEWAYS=http://localhost:4020 trust the stub corridor.
+    app.get("/v1/defaults", (req: Request, res: Response) => {
+      const chainId = typeof req.query.chain_id === "string" ? req.query.chain_id : "";
+      const defaults = stubDefaults(chainId);
+      if (!defaults) {
+        res.status(404).json({ error: `the stub serves no corridor on ${chainId || "(none)"}` });
+        return;
+      }
+      res.json(defaults);
+    });
+  }
+
   app.get("/paid", async (req: Request, res: Response) => {
     // Express lower-cases header names. Read the v2 header, then fall back to v1.
     const paymentHeader = (req.headers["payment-signature"] ??
@@ -623,6 +680,12 @@ async function main(): Promise<void> {
 
   app.listen(PORT, () => {
     console.log(`Merchant listening on http://localhost:${PORT}`);
+    if (USE_STUB_FACILITATOR) {
+      console.log(
+        `Stub corridor served at http://localhost:${PORT}/v1/defaults — pay with ` +
+          `ATUM_TRUST_GATEWAYS=http://localhost:${PORT} so the payer trusts it`,
+      );
+    }
     console.log(
       USE_STUB_FACILITATOR
         ? "Facilitator: stub (local, no funds)"

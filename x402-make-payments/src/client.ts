@@ -7,11 +7,23 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { x402Client } from "@x402/fetch";
-import { registerAtumEscrowScheme, ensureSourceApproval } from "@atumlabs/x402-atum-escrow/client";
+import {
+  DEFAULT_PEG_GROUPS,
+  atumGatewayTrust,
+  ensureSourceApproval,
+  registerAtumEscrowScheme,
+} from "@atumlabs/x402-atum-escrow/client";
 import { wrapFetchWithAtumPayment } from "@atumlabs/x402-atum-escrow/fetch";
 import { payPurchase } from "./purchase.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID } = process.env;
+const {
+  PRIVATE_KEY,
+  MERCHANT_URL = "http://localhost:4020/paid",
+  RPC_URL,
+  PURCHASE_ID,
+  ATUM_TRUST_GATEWAYS,
+  ATUM_PEG_SYMBOLS,
+} = process.env;
 
 // A stub run needs a well-formed key, not a funded one: the payment is signed offline and
 // never touches a chain. So rather than stop a first run to go and produce a key, generate
@@ -53,8 +65,27 @@ if (!PRIVATE_KEY) {
   console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
 }
 
+// Before signing, the client checks the 402's escrow, payTo, reserver, releaser and
+// fulfillment proxy, and both tokens, against a trust source the PAYER controls: the
+// merchant writes the 402, so it cannot also be the authority on where the deposit goes.
+// Unset, that source is Atum's production gateways. Point it elsewhere only for a
+// deployment you run or trust (staging, a local devnet, the stub merchant).
+const csv = (value: string | undefined): string[] =>
+  (value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const trustGateways = csv(ATUM_TRUST_GATEWAYS);
+// Extra token symbols treated as 1:1 with the default US-dollar stablecoins, for a devnet
+// whose tokens are test stand-ins (e.g. TUSDC, TUSDT) the default groups do not name.
+const extraPegged = csv(ATUM_PEG_SYMBOLS);
+
 const client = new x402Client();
-registerAtumEscrowScheme(client, { signer: wallet });
+registerAtumEscrowScheme(client, {
+  signer: wallet,
+  ...(trustGateways.length > 0 ? { trust: atumGatewayTrust({ gateways: trustGateways }) } : {}),
+  ...(extraPegged.length > 0
+    ? { pegGroups: [[...(DEFAULT_PEG_GROUPS[0] ?? []), ...extraPegged], ...DEFAULT_PEG_GROUPS.slice(1)] }
+    : {}),
+});
+if (trustGateways.length > 0) console.log(`Trusting corridors from ${trustGateways.join(", ")}`);
 
 /**
  * Refuse to approve on a different chain than the one the payment names.

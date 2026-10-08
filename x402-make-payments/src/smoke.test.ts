@@ -82,6 +82,33 @@ const decodeHeader = (value: string): Record<string, unknown> =>
 
 const STUB_PAYMENT_ID = "pay_stub_0000000000000000";
 
+// The client refuses to sign a corridor its trust source does not vouch for. The stub is that
+// source for its own placeholder corridor: it answers GET /v1/defaults as a gateway would, for
+// both chains the challenge names, and the client is pointed at it with ATUM_TRUST_GATEWAYS.
+const OFFER = CHALLENGE.accepts[0];
+const STUB_DEFAULTS: Record<string, unknown> = Object.fromEntries(
+  [
+    { chainId: OFFER.network, token: { symbol: "USDC", address: OFFER.asset, decimals: 6 } },
+    {
+      chainId: OFFER.extra.atum.destination.network,
+      token: { symbol: "pathUSD", address: OFFER.extra.atum.destination.asset, decimals: 6 },
+    },
+  ].map(({ chainId, token }) => [
+    chainId,
+    {
+      chain_id: chainId,
+      escrow_contract: OFFER.extra.atum.escrow,
+      fulfillment_proxy: OFFER.extra.atum.fulfillmentProxy,
+      quote_selector: OFFER.extra.atum.reserver,
+      fulfillment_verifier: {
+        account: OFFER.extra.atum.releaser,
+        endpoint: OFFER.extra.atum.fulfillmentVerifierEndpoint,
+      },
+      tokens: [token],
+    },
+  ]),
+);
+
 /**
  * Stub merchant: 402 with the challenge until a payment shows up, then 200 with the
  * resource. It does not verify the signature (the SDK's job) — it only proves the client
@@ -96,6 +123,14 @@ function startStubMerchant(pendingAttempts = 0): Promise<StubMerchant> {
   // purchase must name the same value — that is what makes them one payment.
   const presented: string[] = [];
   const server = http.createServer((req, res) => {
+    const requested = new URL(req.url ?? "/", "http://stub");
+    if (requested.pathname === "/v1/defaults") {
+      const defaults = STUB_DEFAULTS[requested.searchParams.get("chain_id") ?? ""];
+      res.writeHead(defaults ? 200 : 404, { "content-type": "application/json" });
+      res.end(JSON.stringify(defaults ?? { error: "not served" }));
+      return;
+    }
+
     const payment = (req.headers["payment-signature"] ?? req.headers["x-payment"]) as string | undefined;
     if (!payment) {
       res
@@ -146,6 +181,7 @@ function startStubMerchant(pendingAttempts = 0): Promise<StubMerchant> {
       const { port } = server.address() as AddressInfo;
       resolve({
         url: `http://127.0.0.1:${port}/paid`,
+        origin: `http://127.0.0.1:${port}`,
         close: () => server.close(),
         presented: () => presented,
       });
@@ -155,6 +191,8 @@ function startStubMerchant(pendingAttempts = 0): Promise<StubMerchant> {
 
 interface StubMerchant {
   url: string;
+  /** Where the stub answers GET /v1/defaults; the client's trust source. */
+  origin: string;
   close: () => void;
   /** The purchase identifier each presented payment named, in order. */
   presented: () => string[];
@@ -164,6 +202,14 @@ interface RunResult {
   exitCode: number;
   output: string;
 }
+
+// Pays the stub and trusts only its corridor. ATUM_PEG_SYMBOLS is cleared so an exported value
+// cannot leak in.
+const payStub = (merchant: StubMerchant) => ({
+  MERCHANT_URL: merchant.url,
+  ATUM_TRUST_GATEWAYS: merchant.origin,
+  ATUM_PEG_SYMBOLS: "",
+});
 
 function runClient(env: Record<string, string>): Promise<RunResult> {
   return new Promise((resolve, reject) => {
@@ -183,7 +229,7 @@ test("stub flow: 402 -> sign -> pay -> 200", async () => {
   const merchant = await startStubMerchant();
   try {
     // No RPC_URL, so the client skips the on-chain Permit2 approval and signs offline.
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: merchant.url, RPC_URL: "" });
+    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), ...payStub(merchant), RPC_URL: "" });
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
     assert.match(result.output, /Access granted/, `expected the resource body:\n${result.output}`);
@@ -205,7 +251,7 @@ test("a still-settling payment is collected by re-attempting the same purchase",
   // the gateway's synchronous window.
   const merchant = await startStubMerchant(1);
   try {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: merchant.url, RPC_URL: "" });
+    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), ...payStub(merchant), RPC_URL: "" });
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /still settling/, `expected the pending attempt to be reported:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected the re-attempt to be served:\n${result.output}`);
@@ -226,7 +272,7 @@ test("resuming a purchase reuses its identifier instead of generating a new one"
     const purchaseId = "order_resumed_0123456789";
     const result = await runClient({
       PRIVATE_KEY: randomPrivateKey(),
-      MERCHANT_URL: merchant.url,
+      ...payStub(merchant),
       RPC_URL: "",
       PURCHASE_ID: purchaseId,
     });
@@ -243,7 +289,7 @@ test("resuming a purchase reuses its identifier instead of generating a new one"
 test("stub run with no PRIVATE_KEY signs with a generated throwaway key", async () => {
   const merchant = await startStubMerchant();
   try {
-    const result = await runClient({ MERCHANT_URL: merchant.url, PRIVATE_KEY: "", RPC_URL: "" });
+    const result = await runClient({ ...payStub(merchant), PRIVATE_KEY: "", RPC_URL: "" });
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
     assert.match(

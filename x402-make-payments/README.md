@@ -71,13 +71,15 @@ npm install
 cp .env.example .env
 ```
 
-**A stub run needs no `.env` at all** — skip to `npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
+**A stub run needs no `.env` at all** — skip to [running the client](#3-run-the-client). The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
 
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before signing, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 | `MERCHANT_URL` | No | URL of the x402-gated resource. Defaults to `http://localhost:4020/paid`. |
+| `ATUM_TRUST_GATEWAYS` | No | Comma-separated gateway base URLs the client checks the 402's corridor against before signing, e.g. `http://localhost:4020` for the stub merchant. Unset, it uses Atum's production gateways. See [Trusted corridors](#trusted-corridors). |
+| `ATUM_PEG_SYMBOLS` | No | Comma-separated token symbols to treat as 1:1 with the default US-dollar stablecoins, e.g. `TUSDC,TUSDT` for a devnet's test tokens. Unset, the defaults apply. See [Trusted corridors](#trusted-corridors). |
 
 > `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
 
@@ -85,13 +87,18 @@ cp .env.example .env
 
 ### 3. Run the client
 
+Against the stub merchant, point the client's trust check at it:
+
 ```bash
-npm run pay
+ATUM_TRUST_GATEWAYS=http://localhost:4020 npm run pay
 ```
+
+Against a real merchant on Atum's hosted network, run plain `npm run pay`.
 
 Expected output when paired with the stub merchant:
 
 ```
+Trusting corridors from http://localhost:4020
 Requesting http://localhost:4020/paid …
 Purchase order_f45bb75a9adc49258f64 — to re-attempt it: PURCHASE_ID=order_f45bb75a9adc49258f64 npm run pay
   attempt 1/20 …
@@ -103,7 +110,23 @@ Status: 200
 }
 ```
 
-To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`x402-accept-payments`](../x402-accept-payments)) — no funds, no gateway.
+To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` and run the client as above (see [`x402-accept-payments`](../x402-accept-payments)) — no funds, no gateway.
+
+## Trusted corridors
+
+The merchant writes the 402, but its addresses decide where your deposit goes and who may release it. So before signing, the client checks `extra.atum.escrow`, `payTo`, the reserver, the releaser and the destination fulfillment proxy against a trust source **you** control, and requires both tokens to be listed by it and to be the same money (same symbol, or one peg group). A 402 that fails any of this is refused and nothing is signed:
+
+```
+atum-escrow: extra.atum.escrow 0x0000000000000000000000000000000000000001 is not trusted on eip155:84532 (trusted: 0x…)
+```
+
+The check cannot be turned off. Only its source is configurable:
+
+- **Unset (the default):** the client asks `GET /v1/defaults` on Atum's production gateways. That is right for the hosted testnet and mainnet.
+- **`ATUM_TRUST_GATEWAYS`:** the gateways to ask instead, comma-separated. Use it for the stub merchant (`http://localhost:4020`, which serves its placeholder corridor in stub mode only), for staging, or for a local devnet. A devnet reuses mainnet chain ids, so the default would answer with production's addresses and refuse every payment.
+- **`ATUM_PEG_SYMBOLS`:** extra symbols to treat as 1:1 with the default US-dollar stablecoins, e.g. `TUSDC,TUSDT` for a devnet's test tokens. Without it two stand-ins with different symbols cannot be priced against each other.
+
+Only point `ATUM_TRUST_GATEWAYS` at a deployment you run or trust: whatever it answers is what the client will sign deposits into.
 
 ## Testing
 
