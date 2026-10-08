@@ -71,11 +71,11 @@ cp .env.example .env
 npm run dev
 ```
 
-3. **Terminal 2** — x402 payer. No `.env` needed for a stub run:
+3. **Terminal 2** — x402 payer. No `.env` needed for a stub run; `GATEWAY_URL` points the payer's trust check at the stub merchant, which stands in for Atum's gateway:
 
 ```bash
 cd x402-make-payments
-npm run pay
+GATEWAY_URL=http://localhost:4020 npm run pay
 ```
 
 You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
