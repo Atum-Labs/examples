@@ -138,7 +138,19 @@ function startStubMerchant(pendingAttempts = 0): Promise<StubMerchant> {
           extensions: { atum: { paymentId: STUB_PAYMENT_ID, state: "completed" } },
         }),
       })
-      .end(JSON.stringify({ message: "Access granted.", data: "Your premium content here." }));
+      .end(
+        JSON.stringify({
+          status: "fulfilled",
+          message: "Payment received. Report delivered.",
+          report: {
+            id: "rpt_acme_q3_2026",
+            title: "ACME Q3 treasury operations brief",
+            format: "application/pdf",
+            pages: 14,
+            url: "/reports/rpt_acme_q3_2026",
+          },
+        }),
+      );
   });
 
   return new Promise((resolve) => {
@@ -186,7 +198,7 @@ test("stub flow: 402 -> sign -> pay -> 200", async () => {
     const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: merchant.url, RPC_URL: "" });
     assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
     assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
-    assert.match(result.output, /Access granted/, `expected the resource body:\n${result.output}`);
+    assert.match(result.output, /Report delivered/, `expected the resource body:\n${result.output}`);
 
     // The payment must name the purchase, or the gateway could not de-duplicate a retry.
     assert.deepEqual(merchant.presented().length, 1, "expected exactly one payment");

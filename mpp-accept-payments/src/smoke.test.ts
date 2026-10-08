@@ -11,6 +11,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
+import { assetName, formatAmount } from "./display.js";
 
 // Boots the real merchant (stub mode — no gateway, no funds) and the real client
 // as separate processes, exactly as a developer would run them by hand, and checks
@@ -272,7 +273,7 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
     // The merchant must NOT hold the request open waiting for settlement.
     assert.match(
       output(),
-      /accepted, still settling — the payer's re-attempt/,
+      /402: still settling \(payment pay_stub_[0-9a-f]+\)/,
       `expected the merchant to return pending rather than wait:\n${output()}`,
     );
   });
@@ -539,33 +540,30 @@ const REVERSE: Direction = {
  * retry that did the work is invisible.
  */
 function attemptSummary(clientLog: string): string {
-  const attempts = Number(clientLog.match(/settled after (\d+) attempt\(s\)/)?.[1] ?? "1");
-  if (attempts <= 1) return `     attempts:            1 (settled inside the gateway's synchronous window)\n`;
+  const attempts = Number(clientLog.match(/Payment settled after (\d+) attempts?/)?.[1] ?? "1");
+  if (attempts <= 1) return `     attempts:            1\n`;
   const pending = clientLog
     .split("\n")
     .filter((line) => line.includes("still settling"))
     .map((line) => `       ${line.trim()}\n`)
     .join("");
-  return (
-    `     attempts:            ${attempts} (settlement outran the ~30s window; the re-attempt collected it)\n` +
-    pending
-  );
+  return `     attempts:            ${attempts}\n` + pending;
 }
 
 function printSettlementReport(protocol: string, dir: Direction, merchantLog: string, clientLog: string): void {
   const amount = process.env.FULFILLMENT_AMOUNT ?? "50000";
   const dest = process.env.DEST_ADDRESS ?? "(unset)";
-  const paymentId = merchantLog.match(/settled payment (\S+)/)?.[1];
+  const paymentId = merchantLog.match(/settled — payment (\S+)/)?.[1];
   const deposit = merchantLog.match(/source deposit:\s*(\S+)/)?.[1] ?? "(see merchant log)";
   const payout = merchantLog.match(/destination payout:\s*(\S+)/)?.[1];
   const bar = "─".repeat(72);
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — REAL SETTLEMENT CONFIRMED\n` +
+      `  ✅ ${protocol} — settled\n` +
       (paymentId ? `     payment id:          ${paymentId}\n` : "") +
       `     corridor:            ${corridorLabel(dir)}\n` +
       attemptSummary(clientLog) +
-      `     amount:              ${amount} (atomic) paid to ${dest}\n` +
+      `     amount:              ${formatAmount(amount)} ${assetName(dir.destAsset)} to ${dest}\n` +
       `     source deposit:      ${deposit}\n` +
       (payout ? `     destination payout:  ${payout}\n` : "") +
       `${bar}\n\n`,
@@ -612,7 +610,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
     assert.doesNotMatch(merchantLog, /stub/i, `real e2e must not settle via the stub:\n${merchantLog}`);
     assert.match(
       merchantLog,
-      /settled payment 0x[0-9a-f]/i,
+      /settled — payment 0x[0-9a-f]/i,
       `expected a real on-chain settlement in the merchant log:\n${merchantLog}`,
     );
     printSettlementReport("MPP", dir, merchantLog, result.output);
@@ -625,7 +623,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
 const reverseSkip = !REAL_E2E_ENABLED
   ? "set RUN_REAL_E2E=1 and PRIVATE_KEY to run"
   : process.env.SKIP_REVERSE === "1"
-    ? "reverse leg disabled (SKIP_REVERSE=1)"
+    ? "SKIP_REVERSE=1 — reverse corridor needs funds on Tempo"
     : false;
 
 // The test names say which LEG, not which chains: the corridor is a runtime input now,
@@ -637,7 +635,9 @@ test(
 );
 
 test(
-  "real e2e (reverse): settles a real payment back along the same corridor",
+  reverseSkip
+    ? `real e2e (reverse, skipped: ${reverseSkip}): settles a real payment back along the same corridor`
+    : "real e2e (reverse): settles a real payment back along the same corridor",
   { skip: reverseSkip },
   () => runRealSettlement(REVERSE, 4100),
 );

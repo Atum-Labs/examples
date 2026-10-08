@@ -16,10 +16,10 @@ import {
   isGatewayTimeoutError,
   isTerminalStatus,
   assetChainId,
-  type FulfillmentConfirmation,
 } from "@atumlabs/payment-gateway-client";
 import { collectPayment } from "./purchase.js";
 import { startStubGateway } from "./stub-gateway.js";
+import { assetName, banner, corridorLabel, formatAmount, line, logArrival, settledAfter } from "./display.js";
 
 const USE_STUB_GATEWAY = (process.env.USE_STUB_GATEWAY ?? "true") !== "false";
 
@@ -41,55 +41,7 @@ const DEFAULT_GATEWAY = "https://payment-gw.production-testnet.atum.xyz";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-// Same explorer/name maps as mpp-accept-payments and x402-accept-payments' real-settlement
-// reports (src/smoke.test.ts / src/merchant.ts) — kept in sync by hand, same as those two —
-// so a real PGC run reads the same way as a real MPP or x402 run.
-const TX_EXPLORERS: Record<string, string> = {
-  "eip155:84532": "https://sepolia.basescan.org/tx/", // Base Sepolia
-  "eip155:42431": "https://explore.testnet.tempo.xyz/tx/", // Tempo Moderato
-};
-function txLink(chainId: string | undefined, hash: string | undefined): string {
-  if (!hash) return "(none)";
-  const base = chainId ? TX_EXPLORERS[chainId] : undefined;
-  return base ? `${base}${hash}` : `${hash}${chainId ? ` (${chainId})` : ""}`;
-}
-const CHAIN_NAMES: Record<string, string> = {
-  "eip155:84532": "Base Sepolia",
-  "eip155:42431": "Tempo (Moderato)",
-};
-const ASSET_NAMES: Record<string, string> = {
-  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
-  "0x20c0000000000000000000000000000000000000": "pathUSD",
-};
-function endpointLabel(network: string, asset: string): string {
-  return `${CHAIN_NAMES[network] ?? network} ${ASSET_NAMES[asset.toLowerCase()] ?? asset}`;
-}
-const CORRIDOR_LABEL = `${endpointLabel(SOURCE_NETWORK, SOURCE_ASSET)} → ${endpointLabel(DEST_NETWORK, DEST_ASSET)}`;
-
-/** Only called for a real settlement (never the stub) — matches MPP/x402's
- * "✅ ... SETTLED" real-settlement report so all three apps read the same way. */
-function printSettlementReport(
-  paymentId: string,
-  settledSynchronously: boolean,
-  confirmation: FulfillmentConfirmation | undefined,
-): void {
-  const bar = "─".repeat(72);
-  console.log(
-    `\n${bar}\n` +
-      `  ✅ PGC — SETTLED\n` +
-      `     payment id:          ${paymentId}\n` +
-      `     corridor:            ${CORRIDOR_LABEL}\n` +
-      `     attempts:            ${
-        settledSynchronously
-          ? "1 (settled inside the gateway's synchronous window)"
-          : "collected by waiting for a terminal status (PGC has no purchase re-attempt — see src/purchase.ts)"
-      }\n` +
-      `     amount:              ${FULFILLMENT_AMOUNT} (atomic) paid to ${destinationAccount}\n` +
-      `     source deposit:      ${txLink(confirmation?.source_chain_id, confirmation?.source_tx_hash)}\n` +
-      `     destination payout:  ${txLink(confirmation?.destination_chain_id, confirmation?.destination_tx_hash)}\n` +
-      `${bar}\n`,
-  );
-}
+const CORRIDOR_LABEL = corridorLabel(SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK, DEST_ASSET);
 
 // A stub run needs a well-formed key, not a funded one: the payment is signed offline
 // and never touches a chain. So rather than stop a first run to go and produce a key,
@@ -161,9 +113,10 @@ const destinationAccount = ADDRESS_RE.test(RAW_DEST_ADDRESS)
 const sourceAsset = `${SOURCE_NETWORK}/erc20:${SOURCE_ASSET}`;
 const destinationAsset = `${DEST_NETWORK}/erc20:${DEST_ASSET}`;
 
+banner("Payment Gateway client", USE_STUB_GATEWAY ? "stub  ·  no funds" : "real settlement");
+
 if (!PRIVATE_KEY) {
-  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${depositor}).`);
-  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+  line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${depositor}).`);
 }
 
 /**
@@ -202,8 +155,8 @@ async function maybeApproveSource(): Promise<void> {
   });
   console.log(
     result.alreadySufficient
-      ? "Source token already approved."
-      : `Approved source token (tx ${result.txHash}).`,
+      ? "✅  Source token already approved."
+      : `✍️  Approved source token (tx ${result.txHash}).`,
   );
 }
 
@@ -220,8 +173,9 @@ async function main(): Promise<void> {
   try {
     await maybeApproveSource();
 
-    console.log(`Preparing ${sourceAsset} → ${destinationAsset} via ${gatewayUrl} …`);
-    console.log(`Request ${requestId} — to re-attempt it: REQUEST_ID=${requestId} npm run pay`);
+    line("🎯", `Request ${requestId}`);
+    line("🛣️", `${formatAmount(FULFILLMENT_AMOUNT)} ${assetName(DEST_ASSET)}  ·  ${CORRIDOR_LABEL}`);
+    line("📡", `Requesting payment via ${USE_STUB_GATEWAY ? "stub gateway" : gatewayUrl}`);
 
     // Corridor contract addresses come from GET /v1/defaults. Supplying them here
     // would let them drift from the gateway; the SDK fetches what we omit.
@@ -274,7 +228,7 @@ async function main(): Promise<void> {
     }
 
     if (submitted.idempotent_replay) {
-      console.log(`  handed back existing payment ${submitted.payment_id} — nothing additional was charged`);
+      console.log(`  ♻️  handed back existing payment ${submitted.payment_id} — nothing additional was charged`);
     }
 
     const outcome = isTerminalStatus(submitted.status)
@@ -292,11 +246,16 @@ async function main(): Promise<void> {
       "fulfillment_confirmation" in outcome.snapshot
         ? outcome.snapshot.fulfillment_confirmation
         : undefined;
-    console.log(`  settled — payment ${submitted.payment_id}`);
-    console.log(JSON.stringify({ payment_id: submitted.payment_id, status: outcome.status, confirmation }, null, 2));
-    if (!USE_STUB_GATEWAY) {
-      printSettlementReport(submitted.payment_id, isTerminalStatus(submitted.status), confirmation);
-    }
+    console.log(settledAfter(1, `— payment ${submitted.payment_id}`));
+    logArrival({
+      destNetwork: confirmation?.destination_chain_id ?? DEST_NETWORK,
+      destAsset: DEST_ASSET,
+      destHash: confirmation?.destination_tx_hash,
+      sourceNetwork: confirmation?.source_chain_id,
+      sourceHash: confirmation?.source_tx_hash,
+      stub: USE_STUB_GATEWAY,
+    });
+    console.log(`Status: ${outcome.status}`);
   } finally {
     try {
       await stub?.close();

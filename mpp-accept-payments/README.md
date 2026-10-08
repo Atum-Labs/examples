@@ -46,11 +46,11 @@ npm run dev
 You should see:
 
 ```
-MPP merchant listening on http://localhost:4030/paid/<purchase id>
-Submitter: stub (local, no funds)
+⚡  ATUM · MPP merchant · stub  ·  no funds
+MPP merchant starting (stub (local, no funds))
+📡  Merchant listening on http://localhost:4030/paid/<purchase id>
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
 ```
-
-Each request is logged with a short id (e.g. `[a1b2c3d4]`) so you can trace one request's lifecycle in the logs.
 
 ### 4. Try a payment
 
@@ -92,11 +92,10 @@ Pending and failed demand **opposite** actions, so never collapse them into one 
 To watch it locally with no funds, start the merchant with `STUB_PENDING_ATTEMPTS=2`:
 
 ```
-[95da714b] → 402: challenge issued (purchase order_986d…)
-  payment pay_stub_… accepted, still settling — the payer's re-attempt at this purchase will collect the outcome
-[0d71b1b5] → 402: not settled (purchase order_986d…) — see the payment line above
-…
-[cafeffc7] → 200: settled, serving purchase order_986d…
+🎫  → 402: requesting payment (purchase order_986d…)
+⏳  → 402: still settling (payment pay_stub_…)
+✅  → 200: settled (stub — no funds moved) — payment pay_stub_…
+   Destination  Tempo (Moderato) pathUSD — arrived (stub)
 ```
 
 ## Idempotency: what this merchant has to do
@@ -130,13 +129,13 @@ Two things to know when changing the corridor here:
 The payer funds the payment (source token + Base Sepolia gas) — see the [`mpp-make-payments`](../mpp-make-payments) example. Once both are running, a successful real settlement logs the source (Base) and destination (Tempo) transaction links (your ids and hashes will differ):
 
 ```
-MPP merchant listening on http://localhost:4030/paid/<purchase id>
-Submitter: real gateway https://payment-gw.production-testnet.atum.xyz
-[9b590148] → 402: challenge issued
-  settled payment 0xcd49e71041cf5834d7f7599ed31b0028a16d08363d04c202ebdbe3223f404752
-    source deposit:     https://sepolia.basescan.org/tx/0x4b5e59c9ee03f64fa85bcbda5a20a6ba4c0626e59d19b0a079acafdb0af9ec34
-    destination payout: https://explore.testnet.tempo.xyz/tx/0xf941a02fdc39dbff3a2a54aafa9f950fcd6301b28df32b845ca9ba9485408bf3
-[8cb31437] → 200: settled, serving resource
+📡  Merchant listening on http://localhost:4030/paid/<purchase id>
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
+🎫  → 402: requesting payment (purchase order_…)
+✅  → 200: settled — payment 0xcd49e71041cf5834d7f7599ed31b0028a16d08363d04c202ebdbe3223f404752
+   Destination  Tempo (Moderato) pathUSD — arrived
+   destination payout: https://explore.testnet.tempo.xyz/tx/0xf941a02fdc39dbff3a2a54aafa9f950fcd6301b28df32b845ca9ba9485408bf3
+   source deposit:     https://sepolia.basescan.org/tx/0x4b5e59c9ee03f64fa85bcbda5a20a6ba4c0626e59d19b0a079acafdb0af9ec34
 ```
 
 For **mainnet** (where authorized by Atum), the steps are identical — point `GATEWAY_URL` at a production gateway and set `SOURCE_*`/`DEST_*` to Atum-authorized mainnet chains and tokens.
@@ -148,6 +147,7 @@ For **mainnet** (where authorized by Atum), the steps are identical — point `G
 ```
 src/
 ├── merchant.ts     # The mppx server — gate a route behind MPP payment
+├── display.ts      # Shared terminal chrome (banner, corridor, amount)
 ├── payments.ts     # What has been delivered, keyed by payment — so nothing ships twice
 └── smoke.test.ts   # End-to-end check: boots both apps together and verifies a payment succeeds
 ```

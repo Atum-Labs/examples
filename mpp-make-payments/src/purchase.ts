@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+import { settledAfter } from "./display.js";
+
 // Re-attempting a purchase until it reaches a terminal outcome.
 //
 // Cross-chain settlement can take longer than the Atum gateway holds a connection open
@@ -77,11 +79,11 @@ export async function payPurchase(
   let paymentId: string | undefined;
 
   for (let i = 1; i <= maxAttempts; i++) {
-    console.log(`  attempt ${i}/${maxAttempts} …`);
+    if (i > 1) console.log(`  ⏳  attempt ${i}/${maxAttempts} …`);
     const response = await attempt();
 
     if (response.ok) {
-      console.log(`  settled after ${i} attempt(s) in ${elapsed()}`);
+      console.log(settledAfter(i, paymentId ? `— payment ${paymentId}` : undefined));
       return response;
     }
 
@@ -102,7 +104,7 @@ export async function payPurchase(
     paymentId = problem.paymentId ?? paymentId;
     if (i === maxAttempts) break;
     console.log(
-      `  ${paymentId ? `still settling (payment ${paymentId})` : "authorization went stale before submission"}` +
+      `  ⏳  ${paymentId ? `still settling (payment ${paymentId})` : "authorization went stale before submission"}` +
         ` — ${elapsed()} elapsed, re-attempting in ${Math.round(intervalMs / 1000)}s`,
     );
     await sleep(intervalMs);

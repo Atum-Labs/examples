@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+import { logArrival, settledAfter } from "./display.js";
+
 // Re-attempting a purchase until it reaches a terminal outcome.
 //
 // Cross-chain settlement can take longer than the Atum gateway holds a connection open
@@ -46,6 +48,13 @@ interface SettleResponse {
   errorMessage?: string;
   transaction?: string;
   extensions?: { atum?: { paymentId?: string; state?: string; statusUrl?: string } };
+  fulfillmentConfirmation?: {
+    stub?: boolean;
+    source_chain_id?: string;
+    destination_chain_id?: string;
+    source_tx_hash?: string;
+    destination_tx_hash?: string;
+  };
 }
 
 export interface PurchaseOptions {
@@ -84,7 +93,7 @@ export async function payPurchase(
   let paymentId: string | undefined;
 
   for (let i = 1; i <= maxAttempts; i++) {
-    console.log(`  attempt ${i}/${maxAttempts} …`);
+    if (i > 1) console.log(`  ⏳  attempt ${i}/${maxAttempts} …`);
     const response = await attempt();
     const settle = settleResponseOf(response);
 
@@ -95,7 +104,15 @@ export async function payPurchase(
     paymentId = settle.extensions?.atum?.paymentId ?? paymentId;
 
     if (settle.success) {
-      console.log(`  settled after ${i} attempt(s) in ${elapsed()} — payment ${paymentId}`);
+      const confirm = settle.fulfillmentConfirmation;
+      console.log(settledAfter(i, paymentId ? `— payment ${paymentId}` : undefined));
+      logArrival({
+        destNetwork: confirm?.destination_chain_id,
+        destHash: confirm?.destination_tx_hash,
+        sourceNetwork: confirm?.source_chain_id,
+        sourceHash: confirm?.source_tx_hash,
+        stub: Boolean(confirm?.stub),
+      });
       return response;
     }
 
@@ -115,7 +132,7 @@ export async function payPurchase(
 
     if (i === maxAttempts) break;
     console.log(
-      `  still settling (payment ${paymentId}) — ${elapsed()} elapsed, ` +
+      `  ⏳  still settling (payment ${paymentId}) — ${elapsed()} elapsed, ` +
         `re-attempting in ${Math.round(intervalMs / 1000)}s`,
     );
     await sleep(intervalMs);

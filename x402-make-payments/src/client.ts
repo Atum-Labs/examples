@@ -10,6 +10,7 @@ import { x402Client } from "@x402/fetch";
 import { registerAtumEscrowScheme, ensureSourceApproval } from "@atumlabs/x402-atum-escrow/client";
 import { wrapFetchWithAtumPayment } from "@atumlabs/x402-atum-escrow/fetch";
 import { payPurchase } from "./purchase.js";
+import { banner, line } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4020/paid", RPC_URL, PURCHASE_ID } = process.env;
 
@@ -48,9 +49,10 @@ const purchaseId = PURCHASE_ID || `order_${randomBytes(10).toString("hex")}`;
 
 const wallet = new ethers.Wallet(privateKey);
 
+banner("x402 payer", PRIVATE_KEY ? "real settlement" : "stub  ·  no funds");
+
 if (!PRIVATE_KEY) {
-  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${wallet.address}).`);
-  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+  line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${wallet.address}).`);
 }
 
 const client = new x402Client();
@@ -115,8 +117,8 @@ if (RPC_URL) {
     });
     console.log(
       result.alreadySufficient
-        ? "Source token already approved."
-        : `Approved source token (tx ${result.txHash}).`,
+        ? "✅  Source token already approved."
+        : `✍️  Approved source token (tx ${result.txHash}).`,
     );
   });
 }
@@ -125,8 +127,8 @@ if (RPC_URL) {
 // pay for any number of distinct purchases without their identities colliding.
 const pay = wrapFetchWithAtumPayment(fetch, client);
 
-console.log(`Requesting ${MERCHANT_URL} …`);
-console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
+line("🎯", `Purchase ${purchaseId}`);
+line("📡", `Requesting resource: ${MERCHANT_URL}`);
 
 try {
   // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun

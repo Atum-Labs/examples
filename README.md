@@ -78,7 +78,7 @@ cd x402-make-payments
 npm run pay
 ```
 
-You should see a generated payer address, then `Status: 200` and `Access granted`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
+You should see a generated payer address, then `Status: 200` and `Report delivered`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
 
 Set `PRIVATE_KEY` in `.env` (copied from `.env.example`) when you move to real settlement — see [Environments](#environments).
 

@@ -51,13 +51,15 @@ npm run dev
 You should see:
 
 ```
-Merchant listening on http://localhost:4020
-Facilitator: stub (local, no funds)
+⚡  ATUM · x402 merchant · stub  ·  no funds
+x402 merchant starting (stub (local, no funds))
+📡  Merchant listening on http://localhost:4020
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
 ```
 
 ### 4. Try a payment
 
-Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with an `Access granted` body.
+Drive a payment through it with the sibling [`x402-make-payments`](../x402-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential x402 expects. You should get a `200` with a `Report delivered` body.
 
 ## Testing
 
@@ -110,10 +112,11 @@ Pending and failed demand **opposite** actions, so never collapse them into one 
 To watch it locally with no funds, start the merchant with `STUB_PENDING_ATTEMPTS=2`:
 
 ```
-→ 402: no payment credential, issuing challenge
-→ 402: still settling (payment pay_stub_…) — awaiting the payer's re-attempt
-→ 402: no payment credential, issuing challenge
-→ 200: settled (stub — no funds moved) — payment pay_stub_…
+🎫  → 402: requesting payment
+⏳  → 402: still settling (payment pay_stub_…)
+🎫  → 402: requesting payment
+✅  → 200: settled (stub — no funds moved) — payment pay_stub_…
+   Destination  Tempo (Moderato) pathUSD — arrived (stub)
 ```
 
 ## Idempotency: what this merchant has to do
@@ -141,14 +144,15 @@ Two things to know when changing the corridor here:
 The payer funds the payment (source token + gas) — see [`x402-make-payments`](../x402-make-payments). On a successful real settlement the merchant logs the settlement transaction:
 
 ```
-Merchant listening on http://localhost:4020
-Facilitator: real https://payment-gw.production-testnet.atum.xyz/x402/v1 · corridor from https://payment-gw.production-testnet.atum.xyz/v1/defaults
-→ 402: no payment credential, issuing challenge
-→ 402: still settling (payment pay_…) — awaiting the payer's re-attempt
-→ 402: no payment credential, issuing challenge
-→ 200: settled — payment pay_…
-    source deposit:     https://sepolia.basescan.org/tx/0x…
-    destination payout: https://explore.testnet.tempo.xyz/tx/0x…
+📡  Merchant listening on http://localhost:4020
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
+🎫  → 402: requesting payment
+⏳  → 402: still settling (payment pay_…)
+🎫  → 402: requesting payment
+✅  → 200: settled — payment pay_…
+   Destination  Tempo (Moderato) pathUSD — arrived
+   destination payout: https://explore.testnet.tempo.xyz/tx/0x…
+   source deposit:     https://sepolia.basescan.org/tx/0x…
 ```
 
 For **mainnet** (where authorized by Atum), the steps are identical — point `FACILITATOR_URL` / `GATEWAY_URL` at production and set the corridor to Atum-authorized mainnet chains and tokens.
@@ -158,6 +162,7 @@ For **mainnet** (where authorized by Atum), the steps are identical — point `F
 ```
 src/
 ├── merchant.ts     # The x402 merchant — gate a route behind payment (stub or real)
+├── display.ts      # Shared terminal chrome (banner, corridor, amount)
 ├── payments.ts     # What has been delivered, keyed by payment — so nothing ships twice
 └── smoke.test.ts   # End-to-end check: boots both apps together and verifies a payment succeeds
 ```
