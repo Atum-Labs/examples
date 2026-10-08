@@ -52,13 +52,13 @@ export async function collectPayment<T extends StatusSnapshot>(
     return settleOrThrow(first);
   }
 
-  console.log(`  still settling — waiting for a terminal status`);
+  console.log(`  ⏳  still settling — waiting`);
   const outcome = await waitForTerminalStatus({
     fetchStatus,
     budgetMs: options.budgetMs ?? DEFAULT_BUDGET_MS,
     intervalMs: options.intervalMs,
     onError: (error) =>
-      console.warn(`  status check failed, still waiting: ${(error as Error).message}`),
+      console.warn(`  ⏳  status check failed, still waiting: ${(error as Error).message}`),
   });
 
   if (outcome.timedOut || !outcome.snapshot) {

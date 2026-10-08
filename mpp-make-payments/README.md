@@ -19,10 +19,10 @@ The client handles the full payment flow automatically:
 Cross-chain settlement can take longer than the gateway holds a connection open (~30s). Rather than the merchant hanging on — which is what runs into proxy timeouts — `verify()` reports the payment as still settling, and **re-attempting the same purchase collects the result.** The gateway resolves the re-attempt onto the same payment, so it costs nothing and cannot charge twice. [`src/purchase.ts`](src/purchase.ts) does this:
 
 ```
-  attempt 1/20 …
-  still settling (payment pay_…) — 31s elapsed, re-attempting in 5s
-  attempt 2/20 …
-  settled after 2 attempt(s) in 37s
+  ⏳  still settling (payment pay_…) — 31s elapsed, re-attempting in 5s
+  ⏳  attempt 2/20 …
+  ✅  Payment settled after 2 attempts. — payment pay_…
+   Destination  Tempo (Moderato) pathUSD — arrived
 Status: 200
 ```
 
@@ -89,15 +89,24 @@ npm run pay
 Expected output when paired with the stub merchant:
 
 ```
-Requesting http://localhost:4030/paid/order_986d1b6ed264bde2bacd …
-Purchase order_986d1b6ed264bde2bacd — to re-attempt it: PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
-  attempt 1/20 …
-  settled after 1 attempt(s) in 0s
+⚡  ATUM · MPP payer · stub  ·  no funds
+🔑  No PRIVATE_KEY set — signing this stub run with a throwaway key (0x…).
+🎯  Purchase order_986d1b6ed264bde2bacd
+📡  Requesting resource: http://localhost:4030/paid/order_986d1b6ed264bde2bacd
+  ✅  Payment settled.
+   Destination  Tempo (Moderato) pathUSD — arrived (stub)
 Status: 200
 Payment-Receipt header: present
 {
-  "message": "Access granted.",
-  "data": "Your premium content here."
+  "status": "fulfilled",
+  "message": "Payment received. Report delivered.",
+  "report": {
+    "id": "rpt_acme_q3_2026",
+    "title": "ACME Q3 treasury operations brief",
+    "format": "application/pdf",
+    "pages": 14,
+    "url": "/reports/rpt_acme_q3_2026"
+  }
 }
 ```
 
@@ -122,13 +131,23 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 On success the client prints — on the first run the approval line shows the Permit2 approval tx (below); on later runs, once the allowance is set, it reads `Source token already approved.`:
 
 ```
-Requesting http://localhost:4030/paid …
-Approved source token (tx 0x1d6f4c2824186d333c612308420d9c563002cf878e8b1649af4e19fc790f2376).
+✍️  Approved source token (tx 0x1d6f4c2824186d333c612308420d9c563002cf878e8b1649af4e19fc790f2376).
+🎯  Purchase order_…
+📡  Requesting resource: http://localhost:4030/paid/order_…
+  ✅  Payment settled.
+   Destination  Tempo (Moderato) pathUSD — arrived
 Status: 200
 Payment-Receipt header: present
 {
-  "message": "Access granted.",
-  "data": "Your premium content here."
+  "status": "fulfilled",
+  "message": "Payment received. Report delivered.",
+  "report": {
+    "id": "rpt_acme_q3_2026",
+    "title": "ACME Q3 treasury operations brief",
+    "format": "application/pdf",
+    "pages": 14,
+    "url": "/reports/rpt_acme_q3_2026"
+  }
 }
 ```
 
@@ -141,6 +160,7 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 ```
 src/
 ├── client.ts         # The mppx client — names the purchase and pays for the resource
+├── display.ts        # Shared terminal chrome (banner, corridor, amount)
 ├── purchase.ts       # Re-attempts the purchase until settlement reaches a terminal outcome
 └── purchase.test.ts  # Verifies pending is retried and a terminal failure is not
 ```

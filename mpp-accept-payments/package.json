@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "tsx src/merchant.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts"
+    "test": "tsx --test src/*.test.ts",
+    "test:e2e": "tsx --test --test-name-pattern=real.e2e src/*.test.ts"
   },
   "dependencies": {
     "@atumlabs/mppx-atum-escrow": "^0.4.1",

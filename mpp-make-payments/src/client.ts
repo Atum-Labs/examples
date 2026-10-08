@@ -6,9 +6,11 @@
 import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
+import { Receipt } from "mppx";
 import { Mppx } from "mppx/client";
 import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atumlabs/mppx-atum-escrow/client";
 import { payPurchase } from "./purchase.js";
+import { banner, line, logArrival } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID } = process.env;
 
@@ -54,9 +56,10 @@ const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(pur
 // whose deposit signature does not recover to this account, so the two must match.
 const account = new ethers.Wallet(privateKey).address;
 
+banner("MPP payer", PRIVATE_KEY ? "real settlement" : "stub  ·  no funds");
+
 if (!PRIVATE_KEY) {
-  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
-  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+  line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
 }
 
 // Register `atum-escrow` on the mppx client. The private key is bound to the
@@ -117,8 +120,8 @@ if (RPC_URL) {
     });
     console.log(
       result.alreadySufficient
-        ? "Source token already approved."
-        : `Approved source token (tx ${result.txHash}).`,
+        ? "✅  Source token already approved."
+        : `✍️  Approved source token (tx ${result.txHash}).`,
     );
     // Return nothing: this handler only approves as a side effect. Returning a string
     // here would override mppx's credential creation, which we don't want.
@@ -134,6 +137,34 @@ if (RPC_URL) {
  * Every attempt signs a NEW credential, because the challenge's deadlines are absolute
  * timestamps. The purchase identifier is what stays fixed, and it comes from the URL.
  */
+function logArrivalFromReceipt(header: string | null): void {
+  if (!header) {
+    logArrival({});
+    return;
+  }
+  try {
+    const receipt = Receipt.deserialize(header) as {
+      fulfillmentConfirmation?: {
+        destination_chain_id?: string;
+        destination_tx_hash?: string;
+        source_chain_id?: string;
+        source_tx_hash?: string;
+      };
+    };
+    const c = receipt.fulfillmentConfirmation;
+    const destHash = c?.destination_tx_hash;
+    logArrival({
+      destNetwork: c?.destination_chain_id,
+      destHash,
+      sourceNetwork: c?.source_chain_id,
+      sourceHash: c?.source_tx_hash,
+      stub: !destHash || destHash === `0x${"22".repeat(32)}`,
+    });
+  } catch {
+    logArrival({});
+  }
+}
+
 async function attemptPurchase(): Promise<Response> {
   const challengeResponse = await mppx.rawFetch(resourceUrl);
   if (challengeResponse.status !== 402) return challengeResponse;
@@ -141,8 +172,8 @@ async function attemptPurchase(): Promise<Response> {
   return mppx.rawFetch(resourceUrl, { headers: { Authorization: credential } });
 }
 
-console.log(`Requesting ${resourceUrl} …`);
-console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
+line("🎯", `Purchase ${purchaseId}`);
+line("📡", `Requesting resource: ${resourceUrl}`);
 
 try {
   // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
@@ -151,8 +182,9 @@ try {
   const receipt = response.headers.get("payment-receipt");
   const body = await response.json().catch(() => response.text());
 
+  logArrivalFromReceipt(receipt);
   console.log(`Status: ${response.status}`);
-  console.log(`Payment-Receipt header: ${receipt ? "present" : "(none)"}`);
+  if (receipt) console.log("Payment-Receipt header: present");
   console.log(JSON.stringify(body, null, 2));
   if (!response.ok) process.exit(1);
 } catch (err) {

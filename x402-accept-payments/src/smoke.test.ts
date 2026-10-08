@@ -11,10 +11,11 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
+import { assetName, formatAmount } from "./display.js";
 
 // Boots the real merchant and the real make-payments client as separate processes,
 // exactly as a developer would run them by hand, and checks the documented outcome:
-// 402 -> pay -> 200 with "Access granted". This exists to catch the example's own
+// 402 -> pay -> 200 with "Report delivered". This exists to catch the example's own
 // wiring breaking (an import path, an SDK version bump, a header change) — the
 // protocol logic itself is covered by the SDK's own tests.
 //
@@ -195,7 +196,7 @@ async function withMerchant(
 function assertPaid(result: RunResult, label: string): void {
   assert.equal(result.exitCode, 0, `${label} exited non-zero:\n${result.output}`);
   assert.match(result.output, /Status: 200/, `${label} expected a 200 response:\n${result.output}`);
-  assert.match(result.output, /Access granted/, `${label} expected the resource body:\n${result.output}`);
+  assert.match(result.output, /Report delivered/, `${label} expected the resource body:\n${result.output}`);
 }
 
 // The banner is the ownership proof, so a reworded log line must fail here in
@@ -256,7 +257,7 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
     assertPaid(result, "client");
     assert.match(
       output(),
-      /402: still settling \(payment pay_stub_[0-9a-f]+\) — awaiting the payer's re-attempt/,
+      /402: still settling \(payment pay_stub_[0-9a-f]+\)/,
       `expected the merchant to report pending with its payment id:\n${output()}`,
     );
   });
@@ -478,17 +479,14 @@ const REVERSE: Direction = {
  * retry that did the work is invisible.
  */
 function attemptSummary(clientLog: string): string {
-  const attempts = Number(clientLog.match(/settled after (\d+) attempt\(s\)/)?.[1] ?? "1");
-  if (attempts <= 1) return `     attempts:            1 (settled inside the gateway's synchronous window)\n`;
+  const attempts = Number(clientLog.match(/Payment settled after (\d+) attempts?/)?.[1] ?? "1");
+  if (attempts <= 1) return `     attempts:            1\n`;
   const pending = clientLog
     .split("\n")
     .filter((line) => line.includes("still settling"))
     .map((line) => `       ${line.trim()}\n`)
     .join("");
-  return (
-    `     attempts:            ${attempts} (settlement outran the ~30s window; the re-attempt collected it)\n` +
-    pending
-  );
+  return `     attempts:            ${attempts}\n` + pending;
 }
 
 function printSettlementReport(protocol: string, dir: Direction, merchantLog: string, clientLog: string): void {
@@ -510,10 +508,10 @@ function printSettlementReport(protocol: string, dir: Direction, merchantLog: st
     .join("\n");
   process.stdout.write(
     `\n${bar}\n` +
-      `  ✅ ${protocol} — SETTLED\n` +
+      `  ✅ ${protocol} — settled\n` +
       `     corridor:            ${corridorLabel(dir)}\n` +
       attemptSummary(clientLog) +
-      `     expected amount:     ${amount} (atomic) to ${dest}  — confirm on-chain below\n` +
+      `     amount:              ${formatAmount(amount)} ${assetName(dir.destAsset)} to ${dest}\n` +
       `${txLines}\n` +
       `${bar}\n\n`,
   );
@@ -547,7 +545,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
       runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
     );
 
-    const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Access granted/.test(result.output);
+    const paid = result.exitCode === 0 && /Status: 200/.test(result.output) && /Report delivered/.test(result.output);
     if (paid) {
       // Real settlement confirmed — make sure it wasn't the stub.
       const merchantLog = output();
@@ -581,7 +579,7 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
 const reverseSkip = !REAL_E2E_ENABLED
   ? "set RUN_REAL_E2E=1 and PRIVATE_KEY to run"
   : process.env.SKIP_REVERSE === "1"
-    ? "reverse leg disabled (SKIP_REVERSE=1)"
+    ? "SKIP_REVERSE=1 — reverse corridor needs funds on Tempo"
     : false;
 
 // The test names say which LEG, not which chains: the corridor is a runtime input now,
@@ -593,7 +591,9 @@ test(
 );
 
 test(
-  "real e2e (reverse): settles a real payment back along the same corridor",
+  reverseSkip
+    ? `real e2e (reverse, skipped: ${reverseSkip}): settles a real payment back along the same corridor`
+    : "real e2e (reverse): settles a real payment back along the same corridor",
   { skip: reverseSkip },
   () => runRealSettlement(REVERSE, 4090),
 );

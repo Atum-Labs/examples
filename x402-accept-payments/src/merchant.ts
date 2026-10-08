@@ -7,6 +7,7 @@ import "dotenv/config";
 import { createHash } from "node:crypto";
 import express, { Request, Response } from "express";
 import { PaymentLedger } from "./payments.js";
+import { assetName, banner, corridorLabel, formatAmount, logArrival } from "./display.js";
 
 const PORT = Number(process.env.PORT ?? 4020);
 
@@ -380,7 +381,14 @@ function stubFacilitator(): Facilitator {
         network: SOURCE_NETWORK,
         payer: "0x0000000000000000000000000000000000000000",
         extensions: { atum: { paymentId, state: "completed" } },
-        fulfillmentConfirmation: { stub: true, note: "stub settlement — no funds were moved" },
+        fulfillmentConfirmation: {
+          stub: true,
+          note: "stub settlement — no funds were moved",
+          source_chain_id: SOURCE_NETWORK,
+          destination_chain_id: DEST_NETWORK,
+          source_tx_hash: `0x${"11".repeat(32)}`,
+          destination_tx_hash: `0x${"22".repeat(32)}`,
+        },
       };
     },
   };
@@ -432,15 +440,21 @@ function txLink(chainId: string | undefined, hash: string | undefined): string {
 // the confirmation names it explicitly — otherwise print the tx without guessing the chain.
 function logSettlement(settled: SettleResponse): void {
   const c = settled.fulfillmentConfirmation ?? {};
-  const sourceChain = c.source_chain_id as string | undefined;
+  const sourceChain = (c.source_chain_id as string | undefined) ?? SOURCE_NETWORK;
   const sourceHash = c.source_tx_hash as string | undefined;
-  const destChain = c.destination_chain_id as string | undefined;
+  const destChain = (c.destination_chain_id as string | undefined) ?? DEST_NETWORK;
   const destHash = c.destination_tx_hash as string | undefined;
-  if (sourceHash) console.log(`    source deposit:     ${txLink(sourceChain, sourceHash)}`);
-  if (destHash) console.log(`    destination payout: ${txLink(destChain, destHash)}`);
-  if (!sourceHash && !destHash) {
-    console.log(`    settlement tx:      ${txLink(settled.network, settled.transaction)}`);
-    console.log(`    (facilitator reported one leg only — verify the other on-chain)`);
+  const stub = Boolean(c.stub) || USE_STUB_FACILITATOR;
+  logArrival({
+    destNetwork: destChain,
+    destAsset: DEST_ASSET,
+    destHash,
+    sourceNetwork: sourceChain,
+    sourceHash,
+    stub,
+  });
+  if (!stub && !sourceHash && !destHash && settled.transaction) {
+    console.log(`   settlement tx: ${txLink(settled.network, settled.transaction)}`);
   }
 }
 
@@ -450,7 +464,17 @@ function logSettlement(settled: SettleResponse): void {
 
 // What this merchant sells. Recorded against the payment that funded it, so the same
 // payment is never delivered against twice.
-const RESOURCE_BODY = { message: "Access granted.", data: "Your premium content here." };
+const RESOURCE_BODY = {
+  status: "fulfilled",
+  message: "Payment received. Report delivered.",
+  report: {
+    id: "rpt_acme_q3_2026",
+    title: "ACME Q3 treasury operations brief",
+    format: "application/pdf",
+    pages: 14,
+    url: "/reports/rpt_acme_q3_2026",
+  },
+};
 
 function buildApp(requirements: PaymentRequirements): express.Express {
   const app = express();
@@ -481,7 +505,7 @@ function buildApp(requirements: PaymentRequirements): express.Express {
     // No payment credential — issue the 402 challenge with what we accept.
     if (!paymentHeader) {
       const challenge = challengeOf();
-      console.log("→ 402: no payment credential, issuing challenge");
+      console.log("🎫  → 402: requesting payment");
       res
         .status(402)
         .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
@@ -519,7 +543,7 @@ function buildApp(requirements: PaymentRequirements): express.Express {
 
     if (!verified.isValid) {
       const challenge = challengeOf(verified.invalidReason ?? "Payment credential is not valid.");
-      console.log(`→ 402: verify rejected (${challenge.error})`);
+      console.log(`⚠️  → 402: verify rejected (${challenge.error})`);
       res
         .status(402)
         .set(HEADER_PAYMENT_REQUIRED, encodeHeader(challenge))
@@ -561,8 +585,8 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       const challenge = challengeOf(error);
       console.log(
         pending
-          ? `→ 402: still settling (payment ${paymentId}) — awaiting the payer's re-attempt`
-          : `→ 402: not settled (${reason})`,
+          ? `⏳  → 402: still settling (payment ${paymentId})`
+          : `⚠️  → 402: not settled (${reason})`,
       );
       res
         .status(402)
@@ -577,7 +601,7 @@ function buildApp(requirements: PaymentRequirements): express.Express {
     if (paymentId) {
       const already = ledger.served(paymentId);
       if (already) {
-        console.log(`→ 200: payment ${paymentId} was already fulfilled — re-serving, not a new sale`);
+        console.log(`♻️  → 200: payment ${paymentId} was already fulfilled — re-serving, not a new sale`);
         res.json(already.result);
         return;
       }
@@ -586,8 +610,8 @@ function buildApp(requirements: PaymentRequirements): express.Express {
 
     console.log(
       USE_STUB_FACILITATOR
-        ? `→ 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}`
-        : `→ 200: settled${paymentId ? ` — payment ${paymentId}` : ""}`,
+        ? `✅  → 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}`
+        : `✅  → 200: settled${paymentId ? ` — payment ${paymentId}` : ""}`,
     );
     logSettlement(settled);
     res.json(RESOURCE_BODY);
@@ -610,6 +634,7 @@ async function main(): Promise<void> {
 
   // See mpp-accept-payments: printed before the slow part of boot so the smoke
   // tests can tell "still starting" from "died silently".
+  banner("x402 merchant", USE_STUB_FACILITATOR ? "stub  ·  no funds" : "real settlement");
   console.log(
     `x402 merchant starting (${
       USE_STUB_FACILITATOR
@@ -622,11 +647,9 @@ async function main(): Promise<void> {
   const app = buildApp(requirements);
 
   app.listen(PORT, () => {
-    console.log(`Merchant listening on http://localhost:${PORT}`);
+    console.log(`📡  Merchant listening on http://localhost:${PORT}`);
     console.log(
-      USE_STUB_FACILITATOR
-        ? "Facilitator: stub (local, no funds)"
-        : `Facilitator: real ${FACILITATOR_URL} · corridor from ${GATEWAY_URL}/v1/defaults`,
+      `🛣️  ${formatAmount(FULFILLMENT_AMOUNT)} ${assetName(DEST_ASSET)}  ·  ${corridorLabel(SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK, DEST_ASSET)}`,
     );
   });
 }
