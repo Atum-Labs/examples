@@ -16,6 +16,12 @@ The merchant gates a route (`GET /paid/<purchase id>`) behind payment. Unlike x4
 
 By default this example uses a **stub submitter** that returns a canned confirmation, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
 
+## Who does the payer trust?
+
+Before it signs, the payer checks the escrow and roles in the challenge against an Atum gateway it trusts (`GET /v1/defaults`) — by default Atum's production mainnet and testnet gateways, so settle through one of those unless your payers configure a different trust source. Offline there is no gateway, so in stub mode the merchant also answers `GET /v1/defaults?chain_id=…` for its own placeholder corridor; point the payer's `GATEWAY_URL` at the merchant to run the stub flow. In real mode the merchant serves no such route: a payer's trust source must never be the party being paid.
+
+The payer also bounds what it will sign: by default it refuses a spend cap more than 500 bps (5%) above `FULFILLMENT_AMOUNT`, so keep `MARKUP_BPS` at or below 500 unless your payers raise their limit.
+
 ## Prerequisites
 
 - Node.js 20+ — on Node 20 the install prints `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22`; install and stub runs still succeed, and Node 22+ silences it.
@@ -120,7 +126,7 @@ The shipped `.env.example` is already wired for a live **testnet** corridor — 
 2. `MPP_SECRET_KEY=` — set a private one (`openssl rand -hex 32`). The default is a public placeholder and the server refuses to start with it once real settlement is enabled.
 3. `DEST_ADDRESS=` — your receiving address on the destination chain (Tempo).
 
-The corridor (`SOURCE_*` = Base Sepolia USDC, `DEST_*` = Tempo pathUSD), the amount (`FULFILLMENT_AMOUNT=50000`, i.e. `0.05`), and the markup/deadlines are already set — adjust them for a different corridor. The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
+The corridor (`SOURCE_*` = Base Sepolia USDC, `DEST_*` = Tempo pathUSD), the amount (`FULFILLMENT_AMOUNT=50000`, i.e. `0.05`), and the markup/deadlines are already set — adjust them for a different corridor, keeping `MARKUP_BPS` within the payer's bound (see [Who does the payer trust?](#who-does-the-payer-trust)). The escrow, role, proxy, and verifier addresses are resolved from the gateway automatically via `corridorFromDefaults` — you don't configure them by hand.
 
 Two things to know when changing the corridor here:
 
