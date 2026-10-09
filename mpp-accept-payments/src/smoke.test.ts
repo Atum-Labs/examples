@@ -143,7 +143,7 @@ interface MerchantHandle {
 
 async function withMerchant(
   port: number,
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
   fn: (merchant: MerchantHandle) => Promise<void>,
 ): Promise<void> {
   // Fail in milliseconds with something actionable: the boot wait would otherwise burn
@@ -578,20 +578,34 @@ test("stub merchant answers /v1/defaults for its destination chain consistently 
   });
 });
 
-test("stub /v1/defaults names the shipped corridor's chains and tokens", async () => {
-  // The shipped default corridor is Base Sepolia USDC -> Tempo Moderato pathUSD; pin it
-  // here so a default that drifts away from a known token is caught.
-  await withMerchant(4103, STUB_ENV, async ({ url }) => {
+test("stub merchant's default corridor is the shipped Base Sepolia USDC -> Tempo Moderato pathUSD", async () => {
+  // The shell's corridor variables reach the merchant, so they are removed (an undefined
+  // value drops the key from the child's env; an empty string would not fall back) to
+  // observe the merchant's own defaults. Those must be the corridor .env.example ships.
+  const SHIPPED = {
+    sourceNetwork: "eip155:84532",
+    sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    destNetwork: "eip155:42431",
+    destAsset: "0x20c0000000000000000000000000000000000000",
+  };
+  const unsetCorridor = {
+    SOURCE_NETWORK: undefined,
+    SOURCE_ASSET: undefined,
+    DEST_NETWORK: undefined,
+    DEST_ASSET: undefined,
+  };
+  await withMerchant(4103, { ...STUB_ENV, ...unsetCorridor }, async ({ url }) => {
     const request = await fetchChallenge(url);
-    assert.equal(request.source.network, "eip155:84532");
-    assertSameAddress(request.source.asset, "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "shipped source asset");
-    assert.equal(request.extra.destination.network, "eip155:42431");
-    assertSameAddress(request.extra.destination.asset, "0x20c0000000000000000000000000000000000000", "shipped destination asset");
+    const shown = JSON.stringify(request, null, 2);
+    assert.equal(request.source.network, SHIPPED.sourceNetwork, `the default source network:\n${shown}`);
+    assertSameAddress(request.source.asset, SHIPPED.sourceAsset, "the default source asset");
+    assert.equal(request.extra.destination.network, SHIPPED.destNetwork, `the default destination network:\n${shown}`);
+    assertSameAddress(request.extra.destination.asset, SHIPPED.destAsset, "the default destination asset");
 
-    const source = await fetchDefaults(url, "eip155:84532");
-    assertListsTokenAs(source, "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "USDC", 6);
-    const destination = await fetchDefaults(url, "eip155:42431");
-    assertListsTokenAs(destination, "0x20c0000000000000000000000000000000000000", "pathUSD", 6);
+    const source = await fetchDefaults(url, SHIPPED.sourceNetwork);
+    assertListsTokenAs(source, SHIPPED.sourceAsset, "USDC", 6);
+    const destination = await fetchDefaults(url, SHIPPED.destNetwork);
+    assertListsTokenAs(destination, SHIPPED.destAsset, "pathUSD", 6);
   });
 });
 
