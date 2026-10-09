@@ -68,12 +68,13 @@ npm install
 cp .env.example .env
 ```
 
-**A stub run needs no `.env` at all** — skip to `npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
+**A stub run needs no `.env` at all** — skip to `GATEWAY_URL=http://localhost:4030 npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
 
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
 | `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
+| `GATEWAY_URL` | No | The Atum gateway this payer trusts. Before signing, the client checks the escrow and roles in the merchant's challenge against this gateway's `GET /v1/defaults` and refuses a payment through any other. Defaults to Atum's production gateways. Set `http://localhost:4030` against the stub merchant (it answers for its own placeholder corridor), or a local devnet's gateway. It is the payer's choice and never comes from the challenge. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 
 > `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
@@ -83,14 +84,15 @@ cp .env.example .env
 ### 3. Run the client
 
 ```bash
-npm run pay
+GATEWAY_URL=http://localhost:4030 npm run pay
 ```
 
-Expected output when paired with the stub merchant:
+Against the stub merchant, `GATEWAY_URL` points the client's trust check at the merchant, which answers for its placeholder corridor; drop it when paying a real merchant, and the client trusts Atum's production gateways. Expected output when paired with the stub merchant:
 
 ```
+Trusting the corridors vouched for by http://localhost:4030.
 Requesting http://localhost:4030/paid/order_986d1b6ed264bde2bacd …
-Purchase order_986d1b6ed264bde2bacd — to re-attempt it: PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
+Purchase order_986d1b6ed264bde2bacd — to re-attempt it: GATEWAY_URL=http://localhost:4030 PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
   attempt 1/20 …
   settled after 1 attempt(s) in 0s
 Status: 200
@@ -101,7 +103,7 @@ Payment-Receipt header: present
 }
 ```
 
-To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`mpp-accept-payments`](../mpp-accept-payments)) — no funds, no gateway.
+To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`mpp-accept-payments`](../mpp-accept-payments)) — no funds; point `GATEWAY_URL` at the merchant as in the stub run.
 
 ## Testing
 

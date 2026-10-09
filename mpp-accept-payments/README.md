@@ -54,7 +54,7 @@ Each request is logged with a short id (e.g. `[a1b2c3d4]`) so you can trace one 
 
 ### 4. Try a payment
 
-Drive a payment through it with the sibling [`mpp-make-payments`](../mpp-make-payments) client (`npm run pay` after this merchant is up) — a `curl` can't easily produce the signed credential MPP expects. You should get a `200` with a `Payment-Receipt` header.
+Drive a payment through it with the sibling [`mpp-make-payments`](../mpp-make-payments) client (`GATEWAY_URL=http://localhost:4030 npm run pay` after this merchant is up, so the payer's trust check asks this stub) — a `curl` can't easily produce the signed credential MPP expects. You should get a `200` with a `Payment-Receipt` header.
 
 ## Testing
 

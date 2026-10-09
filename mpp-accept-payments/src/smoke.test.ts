@@ -219,12 +219,20 @@ test("the readiness pattern still matches the merchant's own banner", () => {
 
 const STUB_ENV = { USE_STUB_SUBMITTER: "true" };
 
+// The stub corridor exists nowhere but in the stub merchant, which answers /v1/defaults
+// for it at its own origin — so that origin is the trust source a stub-mode payer checks
+// the challenge against.
+function stubGateway(merchantUrl: string): string {
+  return new URL(merchantUrl).origin;
+}
+
 test("stub flow: 402 -> pay -> 200 with a receipt", async () => {
   await withMerchant(4098, STUB_ENV, async ({ url }) => {
     const result = await runClient({
       PRIVATE_KEY: randomPrivateKey(),
       MERCHANT_URL: url,
       RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
     });
     assertPaid(result, "client");
   });
@@ -235,7 +243,12 @@ test("concurrent payments from different wallets all succeed", async () => {
     const CLIENT_COUNT = 5;
     const results = await Promise.all(
       Array.from({ length: CLIENT_COUNT }, () =>
-        runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" }),
+        runClient({
+          PRIVATE_KEY: randomPrivateKey(),
+          MERCHANT_URL: url,
+          RPC_URL: "",
+          GATEWAY_URL: stubGateway(url),
+        }),
       ),
     );
     results.forEach((result, i) => assertPaid(result, `client ${i}`));
@@ -246,7 +259,12 @@ test("the same wallet can complete multiple independent payments in sequence", a
   await withMerchant(4096, STUB_ENV, async ({ url, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
-      const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
+      const result = await runClient({
+        PRIVATE_KEY: key,
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: stubGateway(url),
+      });
       assertPaid(result, `payment ${i + 1}`);
     }
     // Each run names a new purchase, so these are three distinct payments — not one
@@ -263,7 +281,12 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
   // The stub reports the first attempt as still settling, as the gateway does when
   // cross-chain settlement outruns its ~30s synchronous window.
   await withMerchant(4094, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
     assertPaid(result, "client");
     assert.match(
       result.output,
@@ -292,6 +315,7 @@ test("re-attempting a fulfilled purchase re-serves it instead of delivering twic
         MERCHANT_URL: url,
         RPC_URL: "",
         PURCHASE_ID: purchaseId,
+        GATEWAY_URL: stubGateway(url),
       });
       assertPaid(result, label);
     }
@@ -741,6 +765,150 @@ test("a real-mode merchant never answers /v1/defaults for its own corridor", asy
   });
 });
 
+// --- payer trust source -----------------------------------------------------
+//
+// A challenge is written by the party being paid, so the payer checks its escrow and
+// roles against a trust source the merchant does not control before signing. Which source
+// is the payer's choice: GATEWAY_URL when set, Atum's production gateways otherwise.
+
+// The payer's "Requesting <url>" line already contains the merchant origin, so a bare
+// URL match would pass vacuously; the trust-source line must also say it is about trust.
+function trustSourceLines(output: string): string[] {
+  return output.split("\n").filter((line) => /trust/i.test(line));
+}
+
+test("the payer says which gateway it trusts when GATEWAY_URL is set", async () => {
+  await withMerchant(4110, STUB_ENV, async ({ url }) => {
+    const gatewayUrl = stubGateway(url);
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: gatewayUrl,
+    });
+    assertPaid(result, "client");
+    assert.ok(
+      trustSourceLines(result.output).some((line) => line.includes(gatewayUrl)),
+      `expected a line naming ${gatewayUrl} as the trust source:\n${result.output}`,
+    );
+    assert.ok(
+      !trustSourceLines(result.output).some((line) => /production/i.test(line)),
+      `a configured GATEWAY_URL must not be reported as the production gateways:\n${result.output}`,
+    );
+  });
+});
+
+// An empty GATEWAY_URL is "unset" (a blank line in .env), so the payer falls back to
+// Atum's production gateways. Those do not vouch for the stub corridor — and offline they
+// cannot be reached at all, bounded by the SDK's lookup timeout — so either way this run
+// must not pay. Only the reported trust source and the absence of a payment are asserted.
+test("the payer falls back to Atum's production gateways when GATEWAY_URL is empty", { timeout: 90_000 }, async () => {
+  await withMerchant(4111, STUB_ENV, async ({ url, output }) => {
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: "",
+    });
+    const lines = trustSourceLines(result.output);
+    assert.ok(
+      lines.some((line) => /production/i.test(line)),
+      `expected a line saying Atum's production gateways are the trust source:\n${result.output}`,
+    );
+    assert.ok(
+      !lines.some((line) => line.includes(stubGateway(url))),
+      `with GATEWAY_URL empty the payer must not trust the merchant's own origin:\n${result.output}`,
+    );
+    assert.notEqual(result.exitCode, 0, `expected the payer not to pay the stub corridor:\n${result.output}`);
+    assert.doesNotMatch(result.output, /Status: 200/, `the payer must not have been served:\n${result.output}`);
+    assert.doesNotMatch(output(), /→ 200:/, `the merchant must not have served the run:\n${output()}`);
+    assert.doesNotMatch(output(), /settled payment/, `the merchant must not have settled the run:\n${output()}`);
+  });
+});
+
+// A trust source that repeats the stub merchant's own /v1/defaults answer for every chain
+// but vouches for a different escrow. Mirroring the merchant keeps every other anchor and
+// every token identical to its challenge, so the escrow is the only thing a payer can
+// object to. Counting lookups proves a refusal came from the comparison, not from a
+// lookup that never happened. Bound to an OS-assigned port so it never collides.
+async function withSkewedGateway(
+  merchantUrl: string,
+  escrow: string,
+  fn: (gateway: { url: string; lookups(): number }) => Promise<void>,
+): Promise<void> {
+  let lookups = 0;
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://localhost");
+    const chainId = u.searchParams.get("chain_id");
+    if (req.method !== "GET" || u.pathname !== "/v1/defaults" || !chainId) {
+      res.writeHead(404).end();
+      return;
+    }
+    lookups++;
+    void fetch(defaultsUrl(merchantUrl, chainId)).then(
+      async (upstream) => {
+        if (upstream.status !== 200) {
+          res.writeHead(upstream.status).end(await upstream.text());
+          return;
+        }
+        const d = (await upstream.json()) as GatewayDefaults;
+        res.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({ ...d, escrow_contract: escrow }),
+        );
+      },
+      (err: unknown) => res.writeHead(502).end(String(err)),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  try {
+    await fn({ url: `http://127.0.0.1:${port}`, lookups: () => lookups });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+// The same merchant is then paid with its own defaults as the trust source, so the
+// refusal can only be the trust check and not a broken setup.
+test("the payer refuses the stub merchant when its trust source does not vouch for the challenge's escrow", async () => {
+  await withMerchant(4112, STUB_ENV, async ({ url, output }) => {
+    const request = await fetchChallenge(url);
+    const untrustedEscrow = "0x00000000000000000000000000000000000000bA";
+    // Guard the premise: the skew only means something if it differs from the challenge.
+    assert.ok(
+      !sameAddress(request.extra.escrow, untrustedEscrow),
+      `the skewed escrow must differ from the challenge's ${request.extra.escrow}`,
+    );
+
+    await withSkewedGateway(url, untrustedEscrow, async (gateway) => {
+      const refused = await runClient({
+        PRIVATE_KEY: randomPrivateKey(),
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: gateway.url,
+      });
+      assert.notEqual(refused.exitCode, 0, `expected the payer to refuse:\n${refused.output}`);
+      assert.match(refused.output, /extra\.escrow/, `expected the refusal to name the field:\n${refused.output}`);
+      assert.match(refused.output, /not trusted/, `expected an untrusted-escrow refusal:\n${refused.output}`);
+      assert.ok(
+        gateway.lookups() >= 1,
+        `the payer must have consulted the trust source before refusing (lookups: ${gateway.lookups()}):\n${refused.output}`,
+      );
+    });
+    assert.doesNotMatch(output(), /→ 200:/, `the merchant must not have served the refused run:\n${output()}`);
+    assert.doesNotMatch(output(), /settled payment/, `the merchant must not have settled the refused run:\n${output()}`);
+
+    const paid = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
+    assertPaid(paid, "client trusting the stub merchant's own defaults");
+  });
+});
+
 // --- real end-to-end (opt-in; moves real testnet funds) --------------------
 //
 // Runs only when RUN_REAL_E2E=1 and a funded PRIVATE_KEY is set. It settles a real
@@ -937,8 +1105,15 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
   await withMerchant(port, merchantEnv, async ({ url, output }) => {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
     // the other direction can't leak in and point the approval at the wrong chain.
+    // GATEWAY_URL is passed explicitly too: the payer's trust source is a deliberate
+    // choice, and empty means Atum's production gateways.
     const result = await withHeartbeat(`MPP real settlement (${corridorLabel(dir)})`, () =>
-      runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
+      runClient({
+        PRIVATE_KEY: privateKey,
+        MERCHANT_URL: url,
+        RPC_URL: dir.rpcUrl ?? "",
+        GATEWAY_URL: process.env.GATEWAY_URL ?? "",
+      }),
     );
 
     assertPaid(result, "real client");

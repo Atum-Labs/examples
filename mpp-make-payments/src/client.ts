@@ -7,10 +7,16 @@ import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { Mppx } from "mppx/client";
-import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atumlabs/mppx-atum-escrow/client";
+import {
+  registerClient,
+  ensureSourceApproval,
+  atumGatewayTrust,
+  type AtumEscrowChallenge,
+} from "@atumlabs/mppx-atum-escrow/client";
 import { payPurchase } from "./purchase.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
+  process.env;
 
 // A stub run needs a well-formed key, not a funded one: the payment is signed offline and
 // never touches a chain. So rather than stop a first run to go and produce a key, generate
@@ -59,9 +65,19 @@ if (!PRIVATE_KEY) {
   console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
 }
 
+// Before signing, the client checks the escrow and roles the merchant's challenge names
+// against an Atum gateway this payer trusts, and refuses a payment through any other. Which
+// gateway is the payer's choice and never comes from the challenge: Atum's production
+// gateways by default, or GATEWAY_URL — a local devnet, or the stub merchant, which answers
+// for its own placeholder corridor.
+// An empty GATEWAY_URL (a blank line in .env) means unset.
+const gatewayUrl = GATEWAY_URL || undefined;
+const trust = gatewayUrl ? atumGatewayTrust({ gateways: [gatewayUrl] }) : undefined;
+console.log(`Trusting the corridors vouched for by ${gatewayUrl ?? "Atum's production gateways"}.`);
+
 // Register `atum-escrow` on the mppx client. The private key is bound to the
 // challenge's source chain automatically, so one registration pays any supported source.
-const method = registerClient({ signer: { privateKey }, account });
+const method = registerClient({ signer: { privateKey }, account, ...(trust ? { trust } : {}) });
 const mppx = Mppx.create({ methods: [method] });
 
 /**
@@ -142,7 +158,8 @@ async function attemptPurchase(): Promise<Response> {
 }
 
 console.log(`Requesting ${resourceUrl} …`);
-console.log(`Purchase ${purchaseId} — to re-attempt it: PURCHASE_ID=${purchaseId} npm run pay`);
+const gatewayPrefix = gatewayUrl ? `GATEWAY_URL=${gatewayUrl} ` : "";
+console.log(`Purchase ${purchaseId} — to re-attempt it: ${gatewayPrefix}PURCHASE_ID=${purchaseId} npm run pay`);
 
 try {
   // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
