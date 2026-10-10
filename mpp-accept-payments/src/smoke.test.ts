@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import net from "node:net";
+import http from "node:http";
 import { randomBytes } from "node:crypto";
 
 // Boots the real merchant (stub mode — no gateway, no funds) and the real client
@@ -142,7 +143,7 @@ interface MerchantHandle {
 
 async function withMerchant(
   port: number,
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
   fn: (merchant: MerchantHandle) => Promise<void>,
 ): Promise<void> {
   // Fail in milliseconds with something actionable: the boot wait would otherwise burn
@@ -218,12 +219,20 @@ test("the readiness pattern still matches the merchant's own banner", () => {
 
 const STUB_ENV = { USE_STUB_SUBMITTER: "true" };
 
+// The stub corridor exists nowhere but in the stub merchant, which answers /v1/defaults
+// for it at its own origin — so that origin is the trust source a stub-mode payer checks
+// the challenge against.
+function stubGateway(merchantUrl: string): string {
+  return new URL(merchantUrl).origin;
+}
+
 test("stub flow: 402 -> pay -> 200 with a receipt", async () => {
   await withMerchant(4098, STUB_ENV, async ({ url }) => {
     const result = await runClient({
       PRIVATE_KEY: randomPrivateKey(),
       MERCHANT_URL: url,
       RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
     });
     assertPaid(result, "client");
   });
@@ -234,7 +243,12 @@ test("concurrent payments from different wallets all succeed", async () => {
     const CLIENT_COUNT = 5;
     const results = await Promise.all(
       Array.from({ length: CLIENT_COUNT }, () =>
-        runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" }),
+        runClient({
+          PRIVATE_KEY: randomPrivateKey(),
+          MERCHANT_URL: url,
+          RPC_URL: "",
+          GATEWAY_URL: stubGateway(url),
+        }),
       ),
     );
     results.forEach((result, i) => assertPaid(result, `client ${i}`));
@@ -245,7 +259,12 @@ test("the same wallet can complete multiple independent payments in sequence", a
   await withMerchant(4096, STUB_ENV, async ({ url, output }) => {
     const key = randomPrivateKey();
     for (let i = 0; i < 3; i++) {
-      const result = await runClient({ PRIVATE_KEY: key, MERCHANT_URL: url, RPC_URL: "" });
+      const result = await runClient({
+        PRIVATE_KEY: key,
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: stubGateway(url),
+      });
       assertPaid(result, `payment ${i + 1}`);
     }
     // Each run names a new purchase, so these are three distinct payments — not one
@@ -262,7 +281,12 @@ test("a still-settling payment is collected by the payer's re-attempt", async ()
   // The stub reports the first attempt as still settling, as the gateway does when
   // cross-chain settlement outruns its ~30s synchronous window.
   await withMerchant(4094, { ...STUB_ENV, STUB_PENDING_ATTEMPTS: "1" }, async ({ url, output }) => {
-    const result = await runClient({ PRIVATE_KEY: randomPrivateKey(), MERCHANT_URL: url, RPC_URL: "" });
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
     assertPaid(result, "client");
     assert.match(
       result.output,
@@ -291,6 +315,7 @@ test("re-attempting a fulfilled purchase re-serves it instead of delivering twic
         MERCHANT_URL: url,
         RPC_URL: "",
         PURCHASE_ID: purchaseId,
+        GATEWAY_URL: stubGateway(url),
       });
       assertPaid(result, label);
     }
@@ -401,6 +426,501 @@ test("corridor overrides reach the challenge the merchant issues", async () => {
       assert.equal(destination?.asset, DEST_ASSET, `the challenge must name the overridden destination asset:\n${shown}`);
     },
   );
+});
+
+// --- stub gateway defaults --------------------------------------------------
+//
+// In stub mode the merchant's placeholder corridor exists nowhere but in the merchant,
+// so a payer that cross-checks a 402 against Atum's gateway has nothing real to ask.
+// The stub merchant therefore answers /v1/defaults for its own corridor. What it says
+// must agree with the challenge it issues field for field — a disagreement would teach a
+// payer to distrust a correct challenge, or worse, to trust a wrong one.
+
+interface StubChallengeRequest {
+  source: { network: string; asset: string; amount: string };
+  extra: {
+    escrow: string;
+    reserver: string;
+    releaser: string;
+    fulfillmentVerifierEndpoint: string;
+    fulfillmentProxy: string;
+    destination: { network: string; asset: string; address: string };
+  };
+}
+
+interface GatewayDefaults {
+  chain_id: string;
+  escrow_contract: string;
+  quote_selector: string;
+  fulfillment_proxy: string;
+  fulfillment_verifier: { account: string; endpoint: string };
+  tokens: { symbol: string; address: string; decimals: number }[];
+}
+
+// WWW-Authenticate is what an MPP payer actually reads, so the comparison is made
+// against the request decoded from it.
+async function fetchChallenge(url: string): Promise<StubChallengeRequest> {
+  const res = await fetch(`${url}/order_stub_defaults_0001`);
+  assert.equal(res.status, 402, "an unpaid request must be answered with a challenge");
+  const header = res.headers.get("www-authenticate") ?? "";
+  const encoded = header.match(/request="([^"]+)"/)?.[1];
+  assert.ok(encoded, `the 402 must carry a challenge request:\n${header}`);
+  const request = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as StubChallengeRequest;
+  const shown = JSON.stringify(request, null, 2);
+  assert.ok(request.source?.network, `the challenge must name a source network:\n${shown}`);
+  assert.ok(request.extra?.destination?.network, `the challenge must name a destination network:\n${shown}`);
+  return request;
+}
+
+function defaultsUrl(merchantUrl: string, chainId?: string): string {
+  const u = new URL("/v1/defaults", new URL(merchantUrl).origin);
+  if (chainId !== undefined) u.searchParams.set("chain_id", chainId);
+  return u.toString();
+}
+
+async function fetchDefaults(merchantUrl: string, chainId: string): Promise<GatewayDefaults> {
+  const res = await fetch(defaultsUrl(merchantUrl, chainId));
+  const text = await res.text();
+  assert.equal(res.status, 200, `/v1/defaults for ${chainId} must answer 200:\n${text}`);
+  return JSON.parse(text) as GatewayDefaults;
+}
+
+// EVM checksum casing is cosmetic, so addresses compare case-insensitively.
+function sameAddress(a: string | undefined, b: string | undefined): boolean {
+  return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
+}
+
+function assertSameAddress(actual: string | undefined, expected: string, message: string): void {
+  assert.ok(sameAddress(actual, expected), `${message}: got ${actual}, want ${expected}`);
+}
+
+function assertDefaultsShape(d: GatewayDefaults): void {
+  const shown = JSON.stringify(d, null, 2);
+  for (const field of ["chain_id", "escrow_contract", "quote_selector", "fulfillment_proxy"] as const) {
+    assert.equal(typeof d[field], "string", `${field} must be a string:\n${shown}`);
+    assert.notEqual(d[field], "", `${field} must be non-empty:\n${shown}`);
+  }
+  assert.equal(typeof d.fulfillment_verifier?.account, "string", `fulfillment_verifier.account must be a string:\n${shown}`);
+  assert.notEqual(d.fulfillment_verifier.account, "", `fulfillment_verifier.account must be non-empty:\n${shown}`);
+  assert.equal(typeof d.fulfillment_verifier?.endpoint, "string", `fulfillment_verifier.endpoint must be a string:\n${shown}`);
+  assert.notEqual(d.fulfillment_verifier.endpoint, "", `fulfillment_verifier.endpoint must be non-empty:\n${shown}`);
+  assert.ok(Array.isArray(d.tokens), `tokens must be an array:\n${shown}`);
+  for (const t of d.tokens) {
+    assert.equal(typeof t.symbol, "string", `every token needs a string symbol:\n${shown}`);
+    assert.equal(typeof t.address, "string", `every token needs a string address:\n${shown}`);
+    assert.equal(typeof t.decimals, "number", `every token needs numeric decimals:\n${shown}`);
+  }
+}
+
+function findToken(d: GatewayDefaults, address: string): GatewayDefaults["tokens"][number] | undefined {
+  return d.tokens.find((t) => sameAddress(t.address, address));
+}
+
+function assertListsTokenAs(d: GatewayDefaults, address: string, symbol: string, decimals: number): void {
+  const shown = JSON.stringify(d, null, 2);
+  const token = findToken(d, address);
+  assert.ok(token, `tokens must list ${address}:\n${shown}`);
+  assert.strictEqual(token.symbol, symbol, `${address} must be listed as ${symbol}:\n${shown}`);
+  assert.strictEqual(token.decimals, decimals, `${address} must be listed with ${decimals} decimals:\n${shown}`);
+}
+
+// Every role a payer checks against the gateway, for the chain the payer deposits on.
+async function assertSourceDefaultsMatchChallenge(url: string, request: StubChallengeRequest): Promise<GatewayDefaults> {
+  const d = await fetchDefaults(url, request.source.network);
+  assertDefaultsShape(d);
+  const extra = request.extra;
+  assert.equal(d.chain_id, request.source.network, "chain_id must echo the source chain asked for");
+  assertSameAddress(d.escrow_contract, extra.escrow, "escrow_contract must be the escrow the challenge names");
+  assertSameAddress(d.quote_selector, extra.reserver, "quote_selector must be the reserver the challenge names");
+  assertSameAddress(
+    d.fulfillment_verifier.account,
+    extra.releaser,
+    "the verifier account must be the releaser the challenge names",
+  );
+  assert.equal(
+    d.fulfillment_verifier.endpoint,
+    extra.fulfillmentVerifierEndpoint,
+    "the verifier endpoint must be the one the challenge names",
+  );
+  return d;
+}
+
+// The fulfillment proxy lives on the destination chain, so that is where it is vouched for.
+async function assertDestinationDefaultsMatchChallenge(
+  url: string,
+  request: StubChallengeRequest,
+): Promise<GatewayDefaults> {
+  const destination = request.extra.destination;
+  const d = await fetchDefaults(url, destination.network);
+  assertDefaultsShape(d);
+  assert.equal(d.chain_id, destination.network, "chain_id must echo the destination chain asked for");
+  assertSameAddress(
+    d.fulfillment_proxy,
+    request.extra.fulfillmentProxy,
+    "fulfillment_proxy must be the one the challenge names",
+  );
+  return d;
+}
+
+test("stub merchant answers /v1/defaults for its source chain consistently with its 402", async () => {
+  await withMerchant(4101, STUB_ENV, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    const d = await assertSourceDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(d, request.source.asset, "USDC", 6);
+  });
+});
+
+test("stub merchant answers /v1/defaults for its destination chain consistently with its 402", async () => {
+  await withMerchant(4102, STUB_ENV, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    const d = await assertDestinationDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(d, request.extra.destination.asset, "pathUSD", 6);
+  });
+});
+
+test("stub merchant's default corridor is the shipped Base Sepolia USDC -> Tempo Moderato pathUSD", async () => {
+  // The shell's corridor variables reach the merchant, so they are removed (an undefined
+  // value drops the key from the child's env; an empty string would not fall back) to
+  // observe the merchant's own defaults. Those must be the corridor .env.example ships.
+  const SHIPPED = {
+    sourceNetwork: "eip155:84532",
+    sourceAsset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    destNetwork: "eip155:42431",
+    destAsset: "0x20c0000000000000000000000000000000000000",
+  };
+  const unsetCorridor = {
+    SOURCE_NETWORK: undefined,
+    SOURCE_ASSET: undefined,
+    DEST_NETWORK: undefined,
+    DEST_ASSET: undefined,
+  };
+  await withMerchant(4103, { ...STUB_ENV, ...unsetCorridor }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    const shown = JSON.stringify(request, null, 2);
+    assert.equal(request.source.network, SHIPPED.sourceNetwork, `the default source network:\n${shown}`);
+    assertSameAddress(request.source.asset, SHIPPED.sourceAsset, "the default source asset");
+    assert.equal(request.extra.destination.network, SHIPPED.destNetwork, `the default destination network:\n${shown}`);
+    assertSameAddress(request.extra.destination.asset, SHIPPED.destAsset, "the default destination asset");
+
+    const source = await fetchDefaults(url, SHIPPED.sourceNetwork);
+    assertListsTokenAs(source, SHIPPED.sourceAsset, "USDC", 6);
+    const destination = await fetchDefaults(url, SHIPPED.destNetwork);
+    assertListsTokenAs(destination, SHIPPED.destAsset, "pathUSD", 6);
+  });
+});
+
+test("stub /v1/defaults follows the configured corridor, not the shipped one", async () => {
+  // A real mainnet corridor, deliberately different from the shipped testnet default, so
+  // an answer hard-wired to the default corridor cannot pass.
+  const corridor = {
+    SOURCE_NETWORK: "eip155:8453",
+    SOURCE_ASSET: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    DEST_NETWORK: "eip155:4217",
+    DEST_ASSET: "0x20c0000000000000000000000000000000000000",
+  };
+  await withMerchant(4104, { ...STUB_ENV, ...corridor }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    // Guard the premise: the comparison below is only meaningful if the override took.
+    assert.equal(request.source.network, corridor.SOURCE_NETWORK);
+    assertSameAddress(request.source.asset, corridor.SOURCE_ASSET, "overridden source asset");
+    assert.equal(request.extra.destination.network, corridor.DEST_NETWORK);
+    assertSameAddress(request.extra.destination.asset, corridor.DEST_ASSET, "overridden destination asset");
+
+    const source = await assertSourceDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(source, corridor.SOURCE_ASSET, "USDC", 6);
+    const destination = await assertDestinationDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(destination, corridor.DEST_ASSET, "pathUSD", 6);
+
+    // The shipped chains are no longer part of this corridor, so they must not be vouched for.
+    for (const shipped of ["eip155:84532", "eip155:42431"]) {
+      const res = await fetch(defaultsUrl(url, shipped));
+      assert.equal(res.status, 404, `${shipped} is outside the overridden corridor and must be 404:\n${await res.text()}`);
+    }
+  });
+});
+
+test("stub /v1/defaults keys token metadata by address, whatever its casing", async () => {
+  // The corridor reversed, with pathUSD written with an uppercase C, so a lookup that
+  // compares addresses case-sensitively — or keys metadata by leg rather than by
+  // address — cannot pass.
+  const corridor = {
+    SOURCE_NETWORK: "eip155:42431",
+    SOURCE_ASSET: "0x20C0000000000000000000000000000000000000",
+    DEST_NETWORK: "eip155:84532",
+    DEST_ASSET: "0x036cbd53842c5426634e7929541ec2318f3dcf7e",
+  };
+  await withMerchant(4105, { ...STUB_ENV, ...corridor }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    assert.equal(request.source.network, corridor.SOURCE_NETWORK);
+    assert.equal(request.extra.destination.network, corridor.DEST_NETWORK);
+
+    const source = await assertSourceDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(source, corridor.SOURCE_ASSET, "pathUSD", 6);
+    const destination = await assertDestinationDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(destination, corridor.DEST_ASSET, "USDC", 6);
+  });
+});
+
+test("stub /v1/defaults does not vouch for metadata of an asset it does not know", async () => {
+  const unknownAsset = "0x00000000000000000000000000000000000000aa";
+  await withMerchant(4106, { ...STUB_ENV, DEST_ASSET: unknownAsset }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    // Guard the premise: the assertions below only mean something if the override took.
+    assertSameAddress(request.extra.destination.asset, unknownAsset, "overridden destination asset");
+
+    // The roles are still vouched for: they do not depend on which token is paid out.
+    const destination = await assertDestinationDefaultsMatchChallenge(url, request);
+    // Inventing a symbol or decimals for an unknown token would let a payer trust a
+    // guess, so the token must be absent rather than listed with made-up metadata.
+    assert.equal(
+      findToken(destination, unknownAsset),
+      undefined,
+      `an unknown asset must not be listed:\n${JSON.stringify(destination, null, 2)}`,
+    );
+
+    // The known source leg is unaffected by an unknown destination.
+    const source = await assertSourceDefaultsMatchChallenge(url, request);
+    assertListsTokenAs(source, request.source.asset, "USDC", 6);
+  });
+});
+
+test("stub /v1/defaults refuses chains outside its corridor and a missing chain_id", async () => {
+  await withMerchant(4107, STUB_ENV, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    // Guard the premise: a merchant that answers nothing at /v1/defaults would pass the
+    // 404 checks below vacuously, so its own chain must answer first.
+    await fetchDefaults(url, request.source.network);
+
+    // The merchant must not invent trust anchors for a chain it does not settle on.
+    const outside = "eip155:1";
+    assert.notEqual(request.source.network, outside);
+    assert.notEqual(request.extra.destination.network, outside);
+    const foreign = await fetch(defaultsUrl(url, outside));
+    assert.equal(foreign.status, 404, `a chain outside the corridor must be 404:\n${await foreign.text()}`);
+
+    const bare = await fetch(defaultsUrl(url));
+    assert.equal(bare.status, 404, `a request without chain_id must be 404:\n${await bare.text()}`);
+  });
+});
+
+test("stub merchant says its /v1/defaults answers are for the demo only", async () => {
+  // An operator reading the log must be told these trust anchors are the merchant's own
+  // placeholders, not Atum's — a payer trusting them outside the demo trusts the payee.
+  await withMerchant(4108, STUB_ENV, async ({ url, output }) => {
+    // The note may be printed after the listening banner withMerchant waits for. The
+    // child's stdout is one ordered pipe, so once the line logged for a later request has
+    // arrived, everything printed before it has too.
+    await fetchChallenge(url);
+    for (let i = 0; i < 50 && !/challenge issued/.test(output()); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.match(output(), /challenge issued/, `the merchant never logged the challenge:\n${output()}`);
+    const lines = output().split("\n");
+    assert.ok(
+      lines.some((line) => /\/v1\/defaults/.test(line) && /stub|demo/i.test(line)),
+      `expected a log line saying /v1/defaults is answered for the stub demo only:\n${output()}`,
+    );
+  });
+});
+
+// A gateway stand-in that answers any /v1/defaults lookup, so real mode can boot with
+// no network. Bound to an OS-assigned port so it can never collide with a merchant port.
+async function withFakeGateway(fn: (gatewayUrl: string) => Promise<void>): Promise<void> {
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://localhost");
+    const chainId = u.searchParams.get("chain_id");
+    if (u.pathname !== "/v1/defaults" || !chainId) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" }).end(
+      JSON.stringify({
+        chain_id: chainId,
+        escrow_contract: "0x00000000000000000000000000000000000000e1",
+        quote_selector: "0x00000000000000000000000000000000000000e2",
+        fulfillment_proxy: "0x00000000000000000000000000000000000000e3",
+        fulfillment_verifier: {
+          account: "0x00000000000000000000000000000000000000e4",
+          endpoint: "http://127.0.0.1:1/verify",
+        },
+        tokens: [],
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test("a real-mode merchant never answers /v1/defaults for its own corridor", async () => {
+  await withFakeGateway(async (gatewayUrl) => {
+    const env = {
+      USE_STUB_SUBMITTER: "false",
+      GATEWAY_URL: gatewayUrl,
+      MPP_SECRET_KEY: randomBytes(32).toString("hex"),
+      DEST_ADDRESS: "0x00000000000000000000000000000000000000d1",
+      SOURCE_NETWORK: "eip155:84532",
+      DEST_NETWORK: "eip155:42431",
+    };
+    await withMerchant(4109, env, async ({ url, output }) => {
+      // Guard the premise: this must be the real-mode merchant, booted off the stand-in.
+      assert.match(output(), /real gateway/, `expected the merchant to boot in real mode:\n${output()}`);
+      // Trust anchors must come from Atum, never from the party being paid.
+      for (const chainId of [env.SOURCE_NETWORK, env.DEST_NETWORK]) {
+        const res = await fetch(defaultsUrl(url, chainId));
+        assert.equal(res.status, 404, `a real merchant must not serve /v1/defaults for ${chainId}:\n${await res.text()}`);
+      }
+    });
+  });
+});
+
+// --- payer trust source -----------------------------------------------------
+//
+// A challenge is written by the party being paid, so the payer checks its escrow and
+// roles against a trust source the merchant does not control before signing. Which source
+// is the payer's choice: GATEWAY_URL when set, Atum's production gateways otherwise.
+
+// The payer's "Requesting <url>" line already contains the merchant origin, so a bare
+// URL match would pass vacuously; the trust-source line must also say it is about trust.
+function trustSourceLines(output: string): string[] {
+  return output.split("\n").filter((line) => /trust/i.test(line));
+}
+
+test("the payer says which gateway it trusts when GATEWAY_URL is set", async () => {
+  await withMerchant(4110, STUB_ENV, async ({ url }) => {
+    const gatewayUrl = stubGateway(url);
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: gatewayUrl,
+    });
+    assertPaid(result, "client");
+    assert.ok(
+      trustSourceLines(result.output).some((line) => line.includes(gatewayUrl)),
+      `expected a line naming ${gatewayUrl} as the trust source:\n${result.output}`,
+    );
+    assert.ok(
+      !trustSourceLines(result.output).some((line) => /production/i.test(line)),
+      `a configured GATEWAY_URL must not be reported as the production gateways:\n${result.output}`,
+    );
+  });
+});
+
+// An empty GATEWAY_URL is "unset" (a blank line in .env), so the payer falls back to
+// Atum's production gateways. Those do not vouch for the stub corridor — and offline they
+// cannot be reached at all, bounded by the SDK's lookup timeout — so either way this run
+// must not pay. Only the reported trust source and the absence of a payment are asserted.
+test("the payer falls back to Atum's production gateways when GATEWAY_URL is empty", { timeout: 90_000 }, async () => {
+  await withMerchant(4111, STUB_ENV, async ({ url, output }) => {
+    const result = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: "",
+    });
+    const lines = trustSourceLines(result.output);
+    assert.ok(
+      lines.some((line) => /production/i.test(line)),
+      `expected a line saying Atum's production gateways are the trust source:\n${result.output}`,
+    );
+    assert.ok(
+      !lines.some((line) => line.includes(stubGateway(url))),
+      `with GATEWAY_URL empty the payer must not trust the merchant's own origin:\n${result.output}`,
+    );
+    assert.notEqual(result.exitCode, 0, `expected the payer not to pay the stub corridor:\n${result.output}`);
+    assert.doesNotMatch(result.output, /Status: 200/, `the payer must not have been served:\n${result.output}`);
+    assert.doesNotMatch(output(), /→ 200:/, `the merchant must not have served the run:\n${output()}`);
+    assert.doesNotMatch(output(), /settled payment/, `the merchant must not have settled the run:\n${output()}`);
+  });
+});
+
+// A trust source that repeats the stub merchant's own /v1/defaults answer for every chain
+// but vouches for a different escrow. Mirroring the merchant keeps every other anchor and
+// every token identical to its challenge, so the escrow is the only thing a payer can
+// object to. Counting lookups proves a refusal came from the comparison, not from a
+// lookup that never happened. Bound to an OS-assigned port so it never collides.
+async function withSkewedGateway(
+  merchantUrl: string,
+  escrow: string,
+  fn: (gateway: { url: string; lookups(): number }) => Promise<void>,
+): Promise<void> {
+  let lookups = 0;
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://localhost");
+    const chainId = u.searchParams.get("chain_id");
+    if (req.method !== "GET" || u.pathname !== "/v1/defaults" || !chainId) {
+      res.writeHead(404).end();
+      return;
+    }
+    lookups++;
+    void fetch(defaultsUrl(merchantUrl, chainId)).then(
+      async (upstream) => {
+        if (upstream.status !== 200) {
+          res.writeHead(upstream.status).end(await upstream.text());
+          return;
+        }
+        const d = (await upstream.json()) as GatewayDefaults;
+        res.writeHead(200, { "content-type": "application/json" }).end(
+          JSON.stringify({ ...d, escrow_contract: escrow }),
+        );
+      },
+      (err: unknown) => res.writeHead(502).end(String(err)),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  try {
+    await fn({ url: `http://127.0.0.1:${port}`, lookups: () => lookups });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+// The same merchant is then paid with its own defaults as the trust source, so the
+// refusal can only be the trust check and not a broken setup.
+test("the payer refuses the stub merchant when its trust source does not vouch for the challenge's escrow", async () => {
+  await withMerchant(4112, STUB_ENV, async ({ url, output }) => {
+    const request = await fetchChallenge(url);
+    const untrustedEscrow = "0x00000000000000000000000000000000000000bA";
+    // Guard the premise: the skew only means something if it differs from the challenge.
+    assert.ok(
+      !sameAddress(request.extra.escrow, untrustedEscrow),
+      `the skewed escrow must differ from the challenge's ${request.extra.escrow}`,
+    );
+
+    await withSkewedGateway(url, untrustedEscrow, async (gateway) => {
+      const refused = await runClient({
+        PRIVATE_KEY: randomPrivateKey(),
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: gateway.url,
+      });
+      assert.notEqual(refused.exitCode, 0, `expected the payer to refuse:\n${refused.output}`);
+      assert.match(refused.output, /extra\.escrow/, `expected the refusal to name the field:\n${refused.output}`);
+      assert.match(refused.output, /not trusted/, `expected an untrusted-escrow refusal:\n${refused.output}`);
+      assert.ok(
+        gateway.lookups() >= 1,
+        `the payer must have consulted the trust source before refusing (lookups: ${gateway.lookups()}):\n${refused.output}`,
+      );
+    });
+    assert.doesNotMatch(output(), /→ 200:/, `the merchant must not have served the refused run:\n${output()}`);
+    assert.doesNotMatch(output(), /settled payment/, `the merchant must not have settled the refused run:\n${output()}`);
+
+    const paid = await runClient({
+      PRIVATE_KEY: randomPrivateKey(),
+      MERCHANT_URL: url,
+      RPC_URL: "",
+      GATEWAY_URL: stubGateway(url),
+    });
+    assertPaid(paid, "client trusting the stub merchant's own defaults");
+  });
 });
 
 // --- real end-to-end (opt-in; moves real testnet funds) --------------------
@@ -599,8 +1119,15 @@ async function runRealSettlement(dir: Direction, port: number): Promise<void> {
   await withMerchant(port, merchantEnv, async ({ url, output }) => {
     // Set RPC_URL explicitly (empty when the direction has none) so a value exported for
     // the other direction can't leak in and point the approval at the wrong chain.
+    // GATEWAY_URL is passed explicitly too: the payer's trust source is a deliberate
+    // choice, and empty means Atum's production gateways.
     const result = await withHeartbeat(`MPP real settlement (${corridorLabel(dir)})`, () =>
-      runClient({ PRIVATE_KEY: privateKey, MERCHANT_URL: url, RPC_URL: dir.rpcUrl ?? "" }),
+      runClient({
+        PRIVATE_KEY: privateKey,
+        MERCHANT_URL: url,
+        RPC_URL: dir.rpcUrl ?? "",
+        GATEWAY_URL: process.env.GATEWAY_URL ?? "",
+      }),
     );
 
     assertPaid(result, "real client");

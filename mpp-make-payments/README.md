@@ -10,9 +10,22 @@ The client handles the full payment flow automatically:
 
 1. Requests the resource — receives a `402 Payment Required` with an `atum-escrow` challenge.
 2. Reads the corridor terms from the challenge.
-3. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the merchant settles. (Against a real merchant the client also sends a one-off `approve(Permit2)` transaction if your allowance is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).)
-4. Retries the request with the signed credential.
-5. If settlement outruns the gateway's synchronous window, re-attempts the **same purchase** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
+3. With `RPC_URL` set (a real payment), sends a one-off `approve(Permit2)` transaction if your allowance for the source token is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).
+4. Checks the escrow, roles and amounts the challenge names against the Atum gateway it trusts, and refuses to sign the payment if they don't match — see [Who does the payer trust?](#who-does-the-payer-trust).
+5. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the merchant settles.
+6. Retries the request with the signed credential.
+7. If settlement outruns the gateway's synchronous window, re-attempts the **same purchase** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
+
+## Who does the payer trust?
+
+A merchant's challenge names the escrow contract that will hold your deposit and the parties allowed to move it. The client never takes those from the merchant on faith: a merchant that named its own contract as the escrow could take up to the whole spend cap.
+
+- **The trust source is yours.** It is the gateway in `GATEWAY_URL` when set, otherwise Atum's production gateways (mainnet and testnet — which is why the [testnet run](#going-to-testnet--mainnet) needs no `GATEWAY_URL`). The client asks it `GET /v1/defaults?chain_id=…`. It is your configuration and is never read from the challenge.
+- **What is compared.** The challenge's `escrow`, `reserver` and `releaser` must be the source chain's escrow, quote selector and fulfillment-verifier account, and its `fulfillmentProxy` the destination chain's fulfillment proxy.
+- **What the spend cap may be.** Both tokens must be listed by the trust source and be the same money (the same symbol, or pegged to each other, e.g. USDC and pathUSD), and the cap may exceed the amount the merchant receives by at most 500 bps (5%). `registerClient`'s `maxMarkupBps` and `pegGroups` options change those limits.
+- **On a local devnet or a staging deployment, set `GATEWAY_URL` to its gateway.** Atum's production gateways don't vouch for it, so every payment is refused with an `AtumEscrowTrustError` (for example `UNTRUSTED_ESCROW`, or `CHAIN_NOT_TRUSTED` for a chain they don't serve) and no payment is signed. With `RPC_URL` set, the one-off `approve(Permit2)` may already have been sent; it grants Permit2 an allowance but moves no funds.
+
+The stub merchant answers `/v1/defaults` for its own placeholder corridor so the offline demo can pay; a real merchant never does, because a payer's trust source must never be the party being paid.
 
 ## Retries and idempotency
 
@@ -68,12 +81,13 @@ npm install
 cp .env.example .env
 ```
 
-**A stub run needs no `.env` at all** — skip to `npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
+**A stub run needs no `.env` at all** — skip to `GATEWAY_URL=http://localhost:4030 npm run pay`. The payment is signed offline and never touches a chain, so with `PRIVATE_KEY` unset the client generates a throwaway key for the run and prints its address. Copy `.env.example` when you move to real settlement:
 
 | Variable | Required | Description |
 |---|---|---|
 | `PRIVATE_KEY` | For real settlement | 0x-prefixed 32-byte hex private key for the payer wallet; the source account is derived from it. Must be funded. Leave it unset against the stub merchant and the client generates one per run. |
 | `MERCHANT_URL` | No | Base URL of the MPP-gated resource; the client appends the purchase id. Defaults to `http://localhost:4030/paid`. |
+| `GATEWAY_URL` | No | The Atum gateway this payer trusts. Before signing, the client checks the escrow and roles in the merchant's challenge against this gateway's `GET /v1/defaults` and refuses a payment through any other. Defaults to Atum's production gateways. Set `http://localhost:4030` against the stub merchant (it answers for its own placeholder corridor), or a local devnet's gateway. It is the payer's choice and never comes from the challenge. |
 | `RPC_URL` | No | Source-chain RPC URL (Base Sepolia). When set, the client approves the source token (Permit2) before paying, so the escrow deposit does not revert at settlement. Leave blank against the stub merchant. |
 
 > `PURCHASE_ID` is **not** a `.env` value — the client generates one per run and prints it. Pass it on the command line only, to resume an interrupted payment. See [Retries and idempotency](#retries-and-idempotency).
@@ -83,14 +97,15 @@ cp .env.example .env
 ### 3. Run the client
 
 ```bash
-npm run pay
+GATEWAY_URL=http://localhost:4030 npm run pay
 ```
 
-Expected output when paired with the stub merchant:
+Against the stub merchant, `GATEWAY_URL` points the client's trust check at the merchant, which answers for its placeholder corridor; drop it when paying a real merchant, and the client trusts Atum's production gateways. Expected output when paired with the stub merchant:
 
 ```
+Trusting the corridors vouched for by http://localhost:4030.
 Requesting http://localhost:4030/paid/order_986d1b6ed264bde2bacd …
-Purchase order_986d1b6ed264bde2bacd — to re-attempt it: PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
+Purchase order_986d1b6ed264bde2bacd — to re-attempt it: GATEWAY_URL=http://localhost:4030 PURCHASE_ID=order_986d1b6ed264bde2bacd npm run pay
   attempt 1/20 …
   settled after 1 attempt(s) in 0s
 Status: 200
@@ -101,7 +116,7 @@ Payment-Receipt header: present
 }
 ```
 
-To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`mpp-accept-payments`](../mpp-accept-payments)) — no funds, no gateway.
+To watch the re-attempt loop that resolves a slow settlement, start the merchant with `STUB_PENDING_ATTEMPTS=2` (see [`mpp-accept-payments`](../mpp-accept-payments)) — no funds; point `GATEWAY_URL` at the merchant as in the stub run.
 
 ## Testing
 
@@ -118,6 +133,7 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 1. `PRIVATE_KEY=` — the payer wallet's key.
 2. Fund that wallet on **Base Sepolia**: the source token (**USDC**, ~`0.06` to cover the `0.05` charge plus the 3% markup cap) and a little **ETH** for the Permit2 approval's gas. With `RPC_URL` set, the client approves the source token (Permit2) for you before paying — via the `ensureSourceApproval` helper in `@atumlabs/mppx-atum-escrow/client` — so the escrow deposit does not revert at settlement.
 3. Point `MERCHANT_URL` elsewhere only if the merchant isn't the local default.
+4. Leave `GATEWAY_URL` unset (remove it from `.env` if you set it for the stub run), so the client trusts Atum's production gateways — see [Who does the payer trust?](#who-does-the-payer-trust).
 
 On success the client prints — on the first run the approval line shows the Permit2 approval tx (below); on later runs, once the allowance is set, it reads `Source token already approved.`:
 

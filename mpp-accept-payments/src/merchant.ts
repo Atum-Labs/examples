@@ -128,6 +128,62 @@ function stubCorridor(): AtumEscrowCorridor {
   };
 }
 
+// A payer checks the escrow and roles in a challenge against an Atum gateway it trusts
+// before it signs. Offline there is no gateway, so in stub mode this merchant answers that
+// question for its placeholder corridor itself, in the gateway's GET /v1/defaults shape.
+// A real merchant never does: the payer's trust source must not be the party being paid.
+//
+// Token metadata is looked up by address, so a token keeps its own symbol and decimals in
+// whichever direction the corridor runs. The stub vouches only for tokens it knows: an
+// asset missing here is left out of its answer, and a payer then refuses the payment
+// rather than computing its spend cap on guessed decimals. Add a token here to run the
+// stub against it.
+interface StubChainDefaults {
+  chain_id: string;
+  escrow_contract: string;
+  quote_selector: string;
+  fulfillment_proxy: string;
+  fulfillment_verifier: { account: string; endpoint: string };
+  tokens: { symbol: string; address: string; decimals: number }[];
+}
+
+const STUB_KNOWN_TOKENS = new Map<string, { symbol: string; decimals: number }>([
+  ["0x036cbd53842c5426634e7929541ec2318f3dcf7e", { symbol: "USDC", decimals: 6 }], // Base Sepolia
+  ["0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", { symbol: "USDC", decimals: 6 }], // Base
+  ["0x20c0000000000000000000000000000000000000", { symbol: "pathUSD", decimals: 6 }], // Tempo
+]);
+
+function stubToken(address: string): StubChainDefaults["tokens"][number] | undefined {
+  const known = STUB_KNOWN_TOKENS.get(address.toLowerCase());
+  return known && { ...known, address };
+}
+
+// Built from the same corridor the challenge advertises, so the two cannot disagree.
+function stubChainDefaults(
+  corridor: AtumEscrowCorridor,
+  chainId: string,
+): StubChainDefaults | undefined {
+  const source = corridor.sources[0];
+  if (!source || (chainId !== source.network && chainId !== corridor.destination.network)) {
+    return undefined;
+  }
+  const assets = [
+    ...(chainId === source.network ? source.assets : []),
+    ...(chainId === corridor.destination.network ? [corridor.destination.asset] : []),
+  ];
+  return {
+    chain_id: chainId,
+    escrow_contract: source.escrow,
+    quote_selector: source.reserver,
+    fulfillment_proxy: corridor.fulfillmentProxy,
+    fulfillment_verifier: {
+      account: source.releaser,
+      endpoint: source.fulfillmentVerifierEndpoint,
+    },
+    tokens: assets.flatMap((asset) => stubToken(asset) ?? []),
+  };
+}
+
 // How many attempts at a purchase the STUB reports as still settling before it settles.
 // The default of 0 settles on the first attempt. Set it to 2 or 3 to watch the payer's
 // re-attempt resolve a slow cross-chain settlement, with no gateway and no funds:
@@ -303,6 +359,13 @@ async function main() {
 
   const server = http.createServer(async (req, res) => {
     const path = (req.url ?? "").split("?")[0];
+    if (USE_STUB_SUBMITTER && path === "/v1/defaults") {
+      const chainId = new URL(req.url ?? "", "http://stub").searchParams.get("chain_id");
+      const defaults = chainId ? stubChainDefaults(corridor, chainId) : undefined;
+      res.writeHead(defaults ? 200 : 404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(defaults ?? { error: "this stub serves only its own corridor's chains" }));
+      return;
+    }
     if (path !== RESOURCE_PREFIX && !path.startsWith(`${RESOURCE_PREFIX}/`)) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Not found." }));
@@ -383,6 +446,12 @@ async function main() {
   server.listen(PORT, () => {
     console.log(`MPP merchant listening on http://localhost:${PORT}${RESOURCE_PREFIX}/<purchase id>`);
     console.log(`Submitter: ${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_URL}`}`);
+    if (USE_STUB_SUBMITTER) {
+      console.log(
+        `Trust source for the stub demo only: GET http://localhost:${PORT}/v1/defaults answers ` +
+          `for this placeholder corridor. A real merchant never answers it.`,
+      );
+    }
   });
 }
 
