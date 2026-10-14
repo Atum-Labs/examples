@@ -70,9 +70,10 @@ const RAW_DEST_ADDRESS = process.env.DEST_ADDRESS ?? "";
 const DEST_ADDRESS = ADDRESS_RE.test(RAW_DEST_ADDRESS)
   ? RAW_DEST_ADDRESS
   : "0x000000000000000000000000000000000000dEaD";
-// Auction window for settlers to quote. 5s matches the SDK's DEFAULT_QUOTE_DEADLINE_SECONDS
-// (and the MPP example); must be strictly less than FULFILLMENT_DEADLINE_SECONDS.
-const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 5);
+// Settlers can quote until the quote deadline, and the payment waits for it to pass even
+// when a quote arrives sooner, so this window adds directly to payment latency. Too short a
+// window fails with no quote. Must be less than FULFILLMENT_DEADLINE_SECONDS.
+const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 2);
 const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 120);
 
 // ---------------------------------------------------------------------------

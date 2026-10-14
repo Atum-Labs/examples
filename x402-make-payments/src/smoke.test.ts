@@ -66,7 +66,7 @@ const CHALLENGE = {
           reserver: "0x0000000000000000000000000000000000000004",
           releaser: "0x0000000000000000000000000000000000000005",
           fulfillmentVerifierEndpoint: "http://localhost:8080/veri-fill",
-          quoteDeadlineSeconds: 5,
+          quoteDeadlineSeconds: 2,
           fulfillmentDeadlineSeconds: 300,
         },
       },

@@ -445,6 +445,8 @@ interface StubChallengeRequest {
     fulfillmentVerifierEndpoint: string;
     fulfillmentProxy: string;
     destination: { network: string; asset: string; address: string };
+    quoteDeadlineSeconds: number;
+    fulfillmentDeadlineSeconds: number;
   };
 }
 
@@ -606,6 +608,21 @@ test("stub merchant's default corridor is the shipped Base Sepolia USDC -> Tempo
     assertListsTokenAs(source, SHIPPED.sourceAsset, "USDC", 6);
     const destination = await fetchDefaults(url, SHIPPED.destNetwork);
     assertListsTokenAs(destination, SHIPPED.destAsset, "pathUSD", 6);
+  });
+});
+
+test("stub merchant's default quote deadline is the shipped 2s", async () => {
+  // The shell's QUOTE_DEADLINE_SECONDS reaches the merchant, so it is removed to observe
+  // the merchant's own default. A deadline at or past the fulfillment deadline is invalid.
+  await withMerchant(4113, { ...STUB_ENV, QUOTE_DEADLINE_SECONDS: undefined }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    const shown = JSON.stringify(request, null, 2);
+    const { quoteDeadlineSeconds, fulfillmentDeadlineSeconds } = request.extra;
+    assert.equal(quoteDeadlineSeconds, 2, `the default quote deadline:\n${shown}`);
+    assert.ok(
+      quoteDeadlineSeconds < fulfillmentDeadlineSeconds,
+      `the quote deadline must be strictly less than the fulfillment deadline:\n${shown}`,
+    );
   });
 });
 

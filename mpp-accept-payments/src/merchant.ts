@@ -98,7 +98,10 @@ const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:84532"; // Base Sep
 const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e"; // Base Sepolia USDC
 // Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
 const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
-const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "5");
+// Settlers can quote until the quote deadline, and the payment waits for it to pass even
+// when a quote arrives sooner, so this window adds directly to payment latency. Too short a
+// window fails with no quote. Must be less than FULFILLMENT_DEADLINE_SECONDS.
+const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "2");
 const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "120");
 
 const destination = { network: DEST_NETWORK, asset: DEST_ASSET, account: DEST_ACCOUNT };
