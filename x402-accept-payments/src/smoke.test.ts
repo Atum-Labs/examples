@@ -145,7 +145,7 @@ interface MerchantHandle {
 
 async function withMerchant(
   port: number,
-  env: Record<string, string>,
+  env: Record<string, string | undefined>,
   fn: (merchant: MerchantHandle) => Promise<void>,
 ): Promise<void> {
   // Fail in milliseconds with something actionable: the boot wait would otherwise burn
@@ -396,6 +396,7 @@ interface StubOffer {
       releaser: string;
       fulfillmentVerifierEndpoint: string;
       destination: { network: string; asset: string; address: string };
+      quoteDeadlineSeconds: number;
     };
   };
 }
@@ -620,6 +621,15 @@ test("stub /v1/defaults names the shipped corridor's tokens exactly", async () =
     assertListsTokenAs(source, offer.asset, "USDC", 6);
     const destination = await fetchDefaults(url, offer.extra.atum.destination.network);
     assertListsTokenAs(destination, offer.extra.atum.destination.asset, "pathUSD", 6);
+  });
+});
+
+test("stub merchant's default quote deadline is the shipped 3s", async () => {
+  // The shell's QUOTE_DEADLINE_SECONDS reaches the merchant, so it is removed to observe
+  // the merchant's own default.
+  await withMerchant(4101, { ...STUB_ENV, QUOTE_DEADLINE_SECONDS: undefined }, async ({ url }) => {
+    const offer = await fetchOffer(url);
+    assert.equal(offer.extra.atum.quoteDeadlineSeconds, 3, `the default quote deadline:\n${JSON.stringify(offer, null, 2)}`);
   });
 });
 

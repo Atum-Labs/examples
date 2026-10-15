@@ -98,7 +98,11 @@ const SOURCE_NETWORK = process.env.SOURCE_NETWORK ?? "eip155:84532"; // Base Sep
 const SOURCE_ASSET = process.env.SOURCE_ASSET ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e"; // Base Sepolia USDC
 // Markup over the fulfillment amount to derive the source spend cap (300 = 3%).
 const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
-const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "5");
+// Bidding closes this many seconds after the payer builds the payment, so the window also
+// covers signing, the hops to the gateway and any payer clock lag (x402: add your route
+// handler's run time). Too short fails with no quote, or is refused as stale.
+// Must be less than FULFILLMENT_DEADLINE_SECONDS.
+const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "3");
 const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "120");
 
 const destination = { network: DEST_NETWORK, asset: DEST_ASSET, account: DEST_ACCOUNT };

@@ -445,6 +445,7 @@ interface StubChallengeRequest {
     fulfillmentVerifierEndpoint: string;
     fulfillmentProxy: string;
     destination: { network: string; asset: string; address: string };
+    quoteDeadlineSeconds: number;
   };
 }
 
@@ -606,6 +607,15 @@ test("stub merchant's default corridor is the shipped Base Sepolia USDC -> Tempo
     assertListsTokenAs(source, SHIPPED.sourceAsset, "USDC", 6);
     const destination = await fetchDefaults(url, SHIPPED.destNetwork);
     assertListsTokenAs(destination, SHIPPED.destAsset, "pathUSD", 6);
+  });
+});
+
+test("stub merchant's default quote deadline is the shipped 3s", async () => {
+  // The shell's QUOTE_DEADLINE_SECONDS reaches the merchant, so it is removed to observe
+  // the merchant's own default.
+  await withMerchant(4113, { ...STUB_ENV, QUOTE_DEADLINE_SECONDS: undefined }, async ({ url }) => {
+    const request = await fetchChallenge(url);
+    assert.equal(request.extra.quoteDeadlineSeconds, 3, `the default quote deadline:\n${JSON.stringify(request, null, 2)}`);
   });
 });
 
