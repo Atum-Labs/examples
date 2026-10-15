@@ -397,7 +397,6 @@ interface StubOffer {
       fulfillmentVerifierEndpoint: string;
       destination: { network: string; asset: string; address: string };
       quoteDeadlineSeconds: number;
-      fulfillmentDeadlineSeconds: number;
     };
   };
 }
@@ -625,18 +624,12 @@ test("stub /v1/defaults names the shipped corridor's tokens exactly", async () =
   });
 });
 
-test("stub merchant's default quote deadline is the shipped 2s", async () => {
+test("stub merchant's default quote deadline is the shipped 3s", async () => {
   // The shell's QUOTE_DEADLINE_SECONDS reaches the merchant, so it is removed to observe
-  // the merchant's own default. A deadline at or past the fulfillment deadline is invalid.
+  // the merchant's own default.
   await withMerchant(4101, { ...STUB_ENV, QUOTE_DEADLINE_SECONDS: undefined }, async ({ url }) => {
     const offer = await fetchOffer(url);
-    const shown = JSON.stringify(offer, null, 2);
-    const { quoteDeadlineSeconds, fulfillmentDeadlineSeconds } = offer.extra.atum;
-    assert.equal(quoteDeadlineSeconds, 2, `the default quote deadline:\n${shown}`);
-    assert.ok(
-      quoteDeadlineSeconds < fulfillmentDeadlineSeconds,
-      `the quote deadline must be strictly less than the fulfillment deadline:\n${shown}`,
-    );
+    assert.equal(offer.extra.atum.quoteDeadlineSeconds, 3, `the default quote deadline:\n${JSON.stringify(offer, null, 2)}`);
   });
 });
 

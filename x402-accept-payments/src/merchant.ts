@@ -70,10 +70,11 @@ const RAW_DEST_ADDRESS = process.env.DEST_ADDRESS ?? "";
 const DEST_ADDRESS = ADDRESS_RE.test(RAW_DEST_ADDRESS)
   ? RAW_DEST_ADDRESS
   : "0x000000000000000000000000000000000000dEaD";
-// Settlers can quote until the quote deadline, and the payment waits for it to pass even
-// when a quote arrives sooner, so this window adds directly to payment latency. Too short a
-// window fails with no quote. Must be less than FULFILLMENT_DEADLINE_SECONDS.
-const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 2);
+// Bidding closes this many seconds after the payer builds the payment, so the window also
+// covers signing, the hops to the gateway and any payer clock lag (x402: add your route
+// handler's run time). Too short fails with no quote, or is refused as stale.
+// Must be less than FULFILLMENT_DEADLINE_SECONDS.
+const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? 3);
 const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? 120);
 
 // ---------------------------------------------------------------------------
