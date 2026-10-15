@@ -11,6 +11,7 @@ import { Mppx } from "mppx/server";
 import {
   registerServer,
   buildChargeChallenge,
+  buildChargeRequest,
   corridorFromDefaults,
   type AtumEscrowCorridor,
   type AtumEscrowReceipt,
@@ -18,6 +19,7 @@ import {
   type FulfillmentConfirmation,
   type PaymentRequest,
 } from "@atumlabs/mppx-atum-escrow/server";
+import type { PaymentGatewayClient } from "@atumlabs/payment-gateway-client";
 import { PaymentLedger } from "./payments.js";
 
 const PORT = Number(process.env.PORT ?? 4030);
@@ -105,6 +107,12 @@ const MARKUP_BPS = Number(process.env.MARKUP_BPS ?? "300");
 const QUOTE_DEADLINE_SECONDS = Number(process.env.QUOTE_DEADLINE_SECONDS ?? "3");
 const FULFILLMENT_DEADLINE_SECONDS = Number(process.env.FULFILLMENT_DEADLINE_SECONDS ?? "120");
 
+// Every corridor token also declares its ticker and decimals. Payers price the spend cap with
+// what their trust source reports for the token, so the merchant takes the same values from
+// the same place: the gateway's `/v1/defaults` in real mode (see setup()), the stub's table
+// offline.
+type TokenMetadata = { symbol: string; decimals: number };
+
 const destination = { network: DEST_NETWORK, asset: DEST_ASSET, account: DEST_ACCOUNT };
 const budgets = {
   markupBps: MARKUP_BPS,
@@ -116,13 +124,16 @@ const budgets = {
 // placeholders the stub submitter accepts — real ones come from the gateway (see setup()).
 function stubCorridor(): AtumEscrowCorridor {
   return {
-    destination,
+    destination: { ...destination, ...stubTokenMetadata(DEST_ASSET) },
     fulfillmentProxy: "0x0000000000000000000000000000000000000007",
     ...budgets,
+    // A placeholder leg must count as the same money as the stub's known tokens, or a corridor
+    // with one unknown leg is refused before the demo can show the payer refusing it.
+    ...(usesStubPlaceholder() ? { pegGroups: [stubPegGroup()] } : {}),
     sources: [
       {
         network: SOURCE_NETWORK,
-        assets: [SOURCE_ASSET],
+        assets: [{ address: SOURCE_ASSET, ...stubTokenMetadata(SOURCE_ASSET) }],
         escrow: "0x0000000000000000000000000000000000000004",
         reserver: "0x0000000000000000000000000000000000000005",
         releaser: "0x0000000000000000000000000000000000000006",
@@ -162,6 +173,25 @@ function stubToken(address: string): StubChainDefaults["tokens"][number] | undef
   return known && { ...known, address };
 }
 
+// The stub corridor still needs metadata for a token the table does not know, so the
+// challenge can be built. The placeholder stays out of stubChainDefaults: the stub never
+// vouches for it, so a payer still refuses to pay that token.
+const STUB_PLACEHOLDER: TokenMetadata = { symbol: "STUB", decimals: 6 };
+
+function stubTokenMetadata(address: string): TokenMetadata {
+  return STUB_KNOWN_TOKENS.get(address.toLowerCase()) ?? STUB_PLACEHOLDER;
+}
+
+function usesStubPlaceholder(): boolean {
+  return [SOURCE_ASSET, DEST_ASSET].some((a) => !STUB_KNOWN_TOKENS.has(a.toLowerCase()));
+}
+
+// The stub's own money: every token it knows, plus the placeholder.
+function stubPegGroup(): string[] {
+  const symbols = new Set([...STUB_KNOWN_TOKENS.values()].map((t) => t.symbol));
+  return [...symbols, STUB_PLACEHOLDER.symbol];
+}
+
 // Built from the same corridor the challenge advertises, so the two cannot disagree.
 function stubChainDefaults(
   corridor: AtumEscrowCorridor,
@@ -172,7 +202,7 @@ function stubChainDefaults(
     return undefined;
   }
   const assets = [
-    ...(chainId === source.network ? source.assets : []),
+    ...(chainId === source.network ? source.assets.map((asset) => asset.address) : []),
     ...(chainId === corridor.destination.network ? [corridor.destination.asset] : []),
   ];
   return {
@@ -276,11 +306,77 @@ function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
   };
 }
 
+// A token's ticker and decimals, as the gateway lists them in GET /v1/defaults. Refusing a
+// token the gateway does not list is deliberate: payers price the cap with that same list,
+// so a guessed value would only surface later as payments they refuse.
+async function gatewayTokenMetadata(
+  gateway: Pick<PaymentGatewayClient, "chainDefaults">,
+  network: string,
+  address: string,
+): Promise<TokenMetadata> {
+  const lookup = `GET ${GATEWAY_URL}/v1/defaults?chain_id=${network}`;
+  // Typed by the client, but it is still another service's answer: read it as unknown and
+  // check its shape, so a wrong GATEWAY_URL fails with a message instead of a TypeError.
+  let answer: unknown;
+  try {
+    answer = await gateway.chainDefaults.getDefaults({ chainId: network });
+  } catch (err) {
+    throw new Error(`${lookup} failed; check GATEWAY_URL`, { cause: err });
+  }
+  const chain = chainDefaultsFor(answer, network);
+  if (!chain) {
+    throw new Error(
+      `${lookup} did not answer with that chain's defaults; check that GATEWAY_URL points at an ` +
+        `Atum payment gateway`,
+    );
+  }
+  if (chain.tokens !== undefined && !Array.isArray(chain.tokens)) {
+    throw new Error(`${lookup} answered with a token list that is not a list; check GATEWAY_URL`);
+  }
+  // EVM addresses are hex, so letter case carries no meaning; elsewhere (e.g. base58) it does.
+  const same = network.startsWith("eip155:")
+    ? (a: string) => a.toLowerCase() === address.toLowerCase()
+    : (a: string) => a === address;
+  const token = (chain.tokens ?? []).find(
+    (t): t is { address: string; symbol: unknown; decimals: unknown } =>
+      typeof t === "object" && t !== null && typeof (t as { address?: unknown }).address === "string"
+        ? same((t as { address: string }).address)
+        : false,
+  );
+  if (!token) {
+    throw new Error(
+      `the gateway at ${GATEWAY_URL} lists no token ${address} on ${network}, so its symbol and ` +
+        `decimals are unknown; check SOURCE_ASSET / DEST_ASSET against GET /v1/defaults`,
+    );
+  }
+  // Left unchecked here on purpose: setup() builds a charge with the result, so the SDK
+  // refuses a symbol or decimals it cannot use before the merchant starts serving.
+  return { symbol: token.symbol as string, decimals: token.decimals as number };
+}
+
+// One chain's defaults from a /v1/defaults answer: the answer itself when it is for that
+// chain, or that chain's entry when the gateway answered with every chain keyed by id.
+function chainDefaultsFor(answer: unknown, network: string): { tokens?: unknown } | undefined {
+  if (typeof answer !== "object" || answer === null) return undefined;
+  const byKey = answer as Record<string, unknown>;
+  const chain = byKey["chain_id"] === network ? answer : byKey[network];
+  return typeof chain === "object" && chain !== null ? (chain as { tokens?: unknown }) : undefined;
+}
+
+// This merchant charges one fixed price, so it can build that charge once before serving.
+// The SDK would otherwise refuse a bad corridor or price on every request, after the merchant
+// reported ready: incompatible tokens, unusable metadata from the gateway, a price whose cap
+// rounds below it, or an amount the chain cannot hold.
+function assertChargeable(corridor: AtumEscrowCorridor): void {
+  buildChargeRequest(corridor, { network: SOURCE_NETWORK, asset: SOURCE_ASSET }, FULFILLMENT_AMOUNT);
+}
+
 // Resolve the corridor and the submitter for the chosen mode. MPP has no separate
 // facilitator: the merchant verifies in-process and submits through the submitter.
 async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: PaymentSubmitter }> {
   if (USE_STUB_SUBMITTER) {
     const corridor = stubCorridor();
+    assertChargeable(corridor);
     return { corridor, submitter: withSettlementLog(stubSubmitter(corridor)) };
   }
 
@@ -288,11 +384,16 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   // submits the payment.
   const { PaymentGatewayClient } = await import("@atumlabs/payment-gateway-client");
   const gateway = new PaymentGatewayClient({ BASE: GATEWAY_URL });
+  const [destToken, sourceToken] = await Promise.all([
+    gatewayTokenMetadata(gateway, DEST_NETWORK, DEST_ASSET),
+    gatewayTokenMetadata(gateway, SOURCE_NETWORK, SOURCE_ASSET),
+  ]);
   const corridor = await corridorFromDefaults(gateway, {
-    destination,
-    sources: [{ network: SOURCE_NETWORK, assets: [SOURCE_ASSET] }],
+    destination: { ...destination, ...destToken },
+    sources: [{ network: SOURCE_NETWORK, assets: [{ address: SOURCE_ASSET, ...sourceToken }] }],
     ...budgets,
   });
+  assertChargeable(corridor);
   // Submit and return what the gateway said — do NOT poll for completion here.
   //
   // The gateway holds the connection for up to ~30s waiting for settlement. If it finishes
@@ -401,7 +502,7 @@ async function main() {
       // already identifies the purchase — an order id, an invoice number, a job id.
       const { request, meta } = buildChargeChallenge(
         corridor,
-        { network: source.network, asset: source.assets[0] },
+        { network: source.network, asset: source.assets[0].address },
         FULFILLMENT_AMOUNT,
         { intentId: purchaseId },
       );
