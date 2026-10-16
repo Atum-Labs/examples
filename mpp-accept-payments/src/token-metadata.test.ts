@@ -246,26 +246,36 @@ function jsonAnswer(value: unknown): RawAnswer {
 }
 
 // A gateway stand-in answering /v1/defaults per chain with exactly the bytes given.
-// Chains not in the map are 404, as the real gateway answers an unsupported chain. Bound
-// to an OS-assigned port so it never collides with a merchant port.
+// Chains not in the map are 404, as the real gateway answers an unsupported chain. It
+// answers under any path prefix, so a GATEWAY_URL carrying a path still reaches it. Bound
+// to an OS-assigned port so it never collides with a merchant port. `served` lists every
+// lookup it answered from the map, so a test can prove the merchant got as far as reading
+// a particular chain's answer.
+interface ServedLookup {
+  chainId: string;
+  pathname: string;
+}
+
 async function withRawGateway(
   answers: Record<string, RawAnswer>,
-  fn: (gatewayUrl: string) => Promise<void>,
+  fn: (gatewayUrl: string, served: () => ServedLookup[]) => Promise<void>,
 ): Promise<void> {
+  const servedLookups: ServedLookup[] = [];
   const server = http.createServer((req, res) => {
     const u = new URL(req.url ?? "/", "http://localhost");
     const chainId = u.searchParams.get("chain_id");
-    if (req.method !== "GET" || u.pathname !== "/v1/defaults" || !chainId || !(chainId in answers)) {
+    if (req.method !== "GET" || !u.pathname.endsWith("/v1/defaults") || !chainId || !(chainId in answers)) {
       res.writeHead(404).end();
       return;
     }
     const answer = answers[chainId];
+    servedLookups.push({ chainId, pathname: u.pathname });
     res.writeHead(answer.status, { "content-type": answer.contentType }).end(answer.body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as net.AddressInfo;
   try {
-    await fn(`http://127.0.0.1:${port}`);
+    await fn(`http://127.0.0.1:${port}`, () => [...servedLookups]);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -276,7 +286,7 @@ async function withRawGateway(
 // can put a malformed token next to a valid one.
 function withTokenGateway(
   tokensByChain: Record<string, unknown[] | Record<string, unknown> | undefined>,
-  fn: (gatewayUrl: string) => Promise<void>,
+  fn: (gatewayUrl: string, served: () => ServedLookup[]) => Promise<void>,
 ): Promise<void> {
   const answers: Record<string, RawAnswer> = {};
   for (const [chainId, tokens] of Object.entries(tokensByChain)) {
@@ -495,6 +505,7 @@ test("real mode refuses to start when the gateway reports decimals as a string",
       const result = await expectRefusalToStart(4127, realEnv(gatewayUrl));
       assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
       assert.match(result.output, /decimals/, `the refusal must name the decimals field:\n${result.output}`);
+      assertBlamesGatewayMetadata(result);
     },
   );
 });
@@ -691,6 +702,196 @@ test("real mode names the gateway when /v1/defaults answers HTTP 500", async () 
         `the refusal must name the chain whose lookup failed (${REAL_DEST_NETWORK}):\n${result.output}`,
       );
       assert.ok(result.output.includes("GATEWAY_URL"), `the refusal must point at GATEWAY_URL:\n${result.output}`);
+    },
+  );
+});
+
+// --- real mode: gateway-supplied metadata is checked where it is read -------------
+//
+// Metadata the gateway supplies is the gateway's to get right, so a bad field must be
+// refused where it is read, pointing at GATEWAY_URL and the token it describes. The SDK's
+// own `destination.decimals` / `destination.symbol` wording names neither, so seeing it
+// means the merchant let the bad value through to the SDK.
+
+function assertBlamesGatewayMetadata(result: { exitCode: number; output: string }): void {
+  assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+  assert.ok(result.output.includes("GATEWAY_URL"), `the refusal must point at GATEWAY_URL:\n${result.output}`);
+  assert.ok(
+    result.output.includes(REAL_DEST_NETWORK),
+    `the refusal must name the chain the token is listed on (${REAL_DEST_NETWORK}):\n${result.output}`,
+  );
+  assert.ok(
+    result.output.toLowerCase().includes(REAL_DEST_ASSET.toLowerCase()),
+    `the refusal must name the token (${REAL_DEST_ASSET}):\n${result.output}`,
+  );
+  for (const sdkField of ["destination.decimals", "destination.symbol"]) {
+    assert.ok(
+      !result.output.includes(sdkField),
+      `the merchant must refuse the gateway's metadata itself, not leave it to the SDK (${sdkField}):\n${result.output}`,
+    );
+  }
+}
+
+function refuseDestToken(port: number, destToken: Record<string, unknown>) {
+  return new Promise<{ exitCode: number; output: string }>((resolve, reject) => {
+    withTokenGateway(
+      { [REAL_SOURCE_NETWORK]: [VALID_SOURCE_TOKEN], [REAL_DEST_NETWORK]: [destToken] },
+      async (gatewayUrl) => resolve(await expectRefusalToStart(port, realEnv(gatewayUrl))),
+    ).catch(reject);
+  });
+}
+
+test("real mode refuses gateway-reported fractional decimals and blames the gateway", async () => {
+  assertBlamesGatewayMetadata(
+    await refuseDestToken(4138, { symbol: "pathUSD", address: REAL_DEST_ASSET, decimals: 1.5 }),
+  );
+});
+
+test("real mode refuses a gateway token with no symbol and blames the gateway", async () => {
+  assertBlamesGatewayMetadata(await refuseDestToken(4139, { address: REAL_DEST_ASSET, decimals: 6 }));
+});
+
+test("real mode refuses a gateway token with an empty symbol and blames the gateway", async () => {
+  assertBlamesGatewayMetadata(
+    await refuseDestToken(4140, { symbol: "", address: REAL_DEST_ASSET, decimals: 6 }),
+  );
+});
+
+test("real mode refuses gateway-reported decimals beyond any token's range", async () => {
+  // Only the refusal is pinned: whether the merchant or the SDK's range check catches it,
+  // a merchant that boots on 78 decimals would price every cap absurdly.
+  const result = await refuseDestToken(4141, { symbol: "pathUSD", address: REAL_DEST_ASSET, decimals: 78 });
+  assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+});
+
+// --- real mode: an every-chain answer to a one-chain lookup -------------------------
+
+test("real mode refuses an every-chain map where one chain's defaults were asked for", async () => {
+  // The shape a gateway answers when chain_id is ignored: defaults keyed by chain, with no
+  // top-level chain_id. The entry inside is valid, so only the shape can cause a refusal.
+  await withRawGateway(
+    {
+      [REAL_SOURCE_NETWORK]: VALID_SOURCE_ANSWER,
+      [REAL_DEST_NETWORK]: jsonAnswer({ [REAL_DEST_NETWORK]: defaultsBody(REAL_DEST_NETWORK, [VALID_DEST_TOKEN]) }),
+    },
+    async (gatewayUrl) => {
+      const result = await expectRefusalToStart(4142, realEnv(gatewayUrl));
+      assertBlamesGateway(result, { namesGatewayUrl: true });
+      assert.ok(
+        !result.output.includes("every chain rather than"),
+        `the refusal must be the merchant's own, not the gateway client's wording:\n${result.output}`,
+      );
+    },
+  );
+});
+
+// --- real mode: GATEWAY_URL is never printed whole ---------------------------------
+//
+// A gateway URL can carry a credential in its path or query, and the merchant's output
+// lands in terminals and CI logs, so only its origin may ever be printed.
+
+const PATH_SECRET = "PATHSECRET";
+const QUERY_SECRET = "QUERYSECRET";
+
+// The gateway client appends /v1/defaults to GATEWAY_URL as a string, so a credential can
+// only ride in the path; one in a query would end up in front of /v1/defaults.
+function secretGatewayUrl(gatewayOrigin: string): string {
+  return `${gatewayOrigin}/sk_live_${PATH_SECRET}`;
+}
+
+function assertNoGatewaySecrets(output: string): void {
+  assert.ok(!output.includes(PATH_SECRET), `the gateway URL's path must not be printed:\n${output}`);
+  assert.ok(!output.includes(QUERY_SECRET), `the gateway URL's query must not be printed:\n${output}`);
+}
+
+// Proves the lookup went through the secret path and the gateway answered this chain, so
+// a refusal came from reading that answer rather than from a failed fetch.
+function assertServedUnderSecretPath(served: ServedLookup[], chainId: string): void {
+  assert.ok(
+    served.some((l) => l.chainId === chainId && l.pathname === `/sk_live_${PATH_SECRET}/v1/defaults`),
+    `the gateway must have answered ${chainId} under the secret path (served: ${JSON.stringify(served)})`,
+  );
+}
+
+test("real mode prints only the gateway's origin when it boots", async () => {
+  await withTokenGateway(
+    { [REAL_SOURCE_NETWORK]: [VALID_SOURCE_TOKEN], [REAL_DEST_NETWORK]: [VALID_DEST_TOKEN] },
+    async (gatewayOrigin) => {
+      await withMerchant(4143, realEnv(secretGatewayUrl(gatewayOrigin)), async ({ output }) => {
+        // The merchant names its submitter on a line printed after the listening banner, so
+        // wait for that whole line (through its newline) before judging what was printed.
+        const submitterLine = /^Submitter:.*\n/m;
+        for (let i = 0; i < 100 && !submitterLine.test(output()); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const all = output();
+        const submitter = all.match(submitterLine)?.[0];
+        assert.ok(submitter, `the merchant must print its Submitter line after listening:\n${all}`);
+        assert.ok(
+          submitter.includes(gatewayOrigin),
+          `the Submitter line must name the gateway's origin ${gatewayOrigin}:\n${all}`,
+        );
+        assertNoGatewaySecrets(all);
+      });
+    },
+  );
+});
+
+test("real mode does not print the gateway URL's secrets when a token is unlisted", async () => {
+  await withTokenGateway(
+    {
+      [REAL_SOURCE_NETWORK]: [VALID_SOURCE_TOKEN],
+      [REAL_DEST_NETWORK]: [
+        { symbol: "AlphaUSD", address: "0x20c0000000000000000000000000000000000001", decimals: 6 },
+      ],
+    },
+    async (gatewayOrigin, served) => {
+      const result = await expectRefusalToStart(4144, realEnv(secretGatewayUrl(gatewayOrigin)));
+      assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+      assertServedUnderSecretPath(served(), REAL_DEST_NETWORK);
+      assert.ok(
+        result.output.toLowerCase().includes(REAL_DEST_ASSET.toLowerCase()),
+        `the refusal must be the unlisted-token one, naming ${REAL_DEST_ASSET}:\n${result.output}`,
+      );
+      assertNoGatewaySecrets(result.output);
+    },
+  );
+});
+
+test("real mode does not print the gateway URL's secrets when an answer is malformed", async () => {
+  await withRawGateway(
+    { [REAL_SOURCE_NETWORK]: VALID_SOURCE_ANSWER, [REAL_DEST_NETWORK]: jsonAnswer(null) },
+    async (gatewayOrigin, served) => {
+      const result = await expectRefusalToStart(4145, realEnv(secretGatewayUrl(gatewayOrigin)));
+      assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+      assertServedUnderSecretPath(served(), REAL_DEST_NETWORK);
+      assert.ok(
+        result.output.includes(REAL_DEST_NETWORK),
+        `the refusal must name the chain whose answer was malformed (${REAL_DEST_NETWORK}):\n${result.output}`,
+      );
+      assertNoGatewaySecrets(result.output);
+    },
+  );
+});
+
+test("real mode refuses a GATEWAY_URL that is not a URL", async () => {
+  const result = await expectRefusalToStart(4146, realEnv("not a url"));
+  assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+  assert.ok(result.output.includes("GATEWAY_URL"), `the refusal must name GATEWAY_URL:\n${result.output}`);
+  // The diagnosis itself, not a generic lookup failure that merely mentions the variable.
+  assert.ok(result.output.includes("not a valid URL"), `the refusal must say GATEWAY_URL is not a valid URL:\n${result.output}`);
+  assert.ok(!result.output.includes("TypeError"), `a bad GATEWAY_URL must not surface as a TypeError:\n${result.output}`);
+});
+
+test("real mode refuses a GATEWAY_URL with a query and does not print it", async () => {
+  // No lookup can succeed through such a URL, so it must not boot; and since a query is
+  // where an API key often rides, the refusal must not echo it either.
+  await withTokenGateway(
+    { [REAL_SOURCE_NETWORK]: [VALID_SOURCE_TOKEN], [REAL_DEST_NETWORK]: [VALID_DEST_TOKEN] },
+    async (gatewayOrigin) => {
+      const result = await expectRefusalToStart(4147, realEnv(`${gatewayOrigin}/?api_key=${QUERY_SECRET}`));
+      assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+      assert.ok(!result.output.includes(QUERY_SECRET), `the gateway URL's query must not be printed:\n${result.output}`);
     },
   );
 });

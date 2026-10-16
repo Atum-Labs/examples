@@ -55,6 +55,18 @@ const FULFILLMENT_AMOUNT = process.env.FULFILLMENT_AMOUNT ?? "50000"; // 0.05 (6
 // USE_STUB_SUBMITTER=false to settle through a real Atum Payment Gateway instead.
 const USE_STUB_SUBMITTER = (process.env.USE_STUB_SUBMITTER ?? "true") !== "false";
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "https://payment-gw.production-testnet.atum.xyz";
+// Logs and errors name the gateway by origin only: a gateway URL can carry a credential in
+// its path, and these lines end up in logs and CI output.
+const GATEWAY_ORIGIN = urlOrigin(GATEWAY_URL);
+const GATEWAY_LABEL = GATEWAY_ORIGIN ?? "(GATEWAY_URL is not a valid URL)";
+
+function urlOrigin(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
 
 // The public placeholder secret is fine for the stub flow (nothing of value is at
 // stake), but would let anyone who's read this repo forge a trusted challenge
@@ -314,14 +326,18 @@ async function gatewayTokenMetadata(
   network: string,
   address: string,
 ): Promise<TokenMetadata> {
-  const lookup = `GET ${GATEWAY_URL}/v1/defaults?chain_id=${network}`;
+  const lookup = `GET /v1/defaults?chain_id=${network} on the gateway at ${GATEWAY_LABEL}`;
   // Typed by the client, but it is still another service's answer: read it as unknown and
   // check its shape, so a wrong GATEWAY_URL fails with a message instead of a TypeError.
   let answer: unknown;
   try {
     answer = await gateway.chainDefaults.getDefaults({ chainId: network });
   } catch (err) {
-    throw new Error(`${lookup} failed; check GATEWAY_URL`, { cause: err });
+    // Only the status is kept: the client's own error quotes the full request URL, which
+    // would print whatever credential GATEWAY_URL carries.
+    const status = (err as { status?: unknown } | null)?.status;
+    const detail = typeof status === "number" ? ` with HTTP ${status}` : "";
+    throw new Error(`${lookup} failed${detail}; check GATEWAY_URL`);
   }
   const chain = chainDefaultsFor(answer, network);
   if (!chain) {
@@ -338,29 +354,35 @@ async function gatewayTokenMetadata(
     ? (a: string) => a.toLowerCase() === address.toLowerCase()
     : (a: string) => a === address;
   const token = (chain.tokens ?? []).find(
-    (t): t is { address: string; symbol: unknown; decimals: unknown } =>
+    (t): t is { address: string; symbol?: unknown; decimals?: unknown } =>
       typeof t === "object" && t !== null && typeof (t as { address?: unknown }).address === "string"
         ? same((t as { address: string }).address)
         : false,
   );
   if (!token) {
     throw new Error(
-      `the gateway at ${GATEWAY_URL} lists no token ${address} on ${network}, so its symbol and ` +
+      `the gateway at ${GATEWAY_LABEL} lists no token ${address} on ${network}, so its symbol and ` +
         `decimals are unknown; check SOURCE_ASSET / DEST_ASSET against GET /v1/defaults`,
     );
   }
-  // Left unchecked here on purpose: setup() builds a charge with the result, so the SDK
-  // refuses a symbol or decimals it cannot use before the merchant starts serving.
-  return { symbol: token.symbol as string, decimals: token.decimals as number };
+  // Checked here rather than left to the SDK, so the error names the gateway the values came
+  // from; the SDK still enforces the 0–77 decimals range.
+  const { symbol, decimals } = token;
+  if (typeof symbol !== "string" || symbol === "" || typeof decimals !== "number" || !Number.isInteger(decimals)) {
+    throw new Error(
+      `${lookup} lists token ${address} with an unusable symbol or decimals (symbol ` +
+        `${JSON.stringify(symbol)}, decimals ${JSON.stringify(decimals)}); check GATEWAY_URL`,
+    );
+  }
+  return { symbol, decimals };
 }
 
-// One chain's defaults from a /v1/defaults answer: the answer itself when it is for that
-// chain, or that chain's entry when the gateway answered with every chain keyed by id.
+// One chain's defaults from a /v1/defaults answer. Asked for one chain, the gateway answers
+// with that chain; anything else (including the every-chain map, which the client refuses in
+// corridorFromDefaults anyway) is not an answer this merchant can use.
 function chainDefaultsFor(answer: unknown, network: string): { tokens?: unknown } | undefined {
   if (typeof answer !== "object" || answer === null) return undefined;
-  const byKey = answer as Record<string, unknown>;
-  const chain = byKey["chain_id"] === network ? answer : byKey[network];
-  return typeof chain === "object" && chain !== null ? (chain as { tokens?: unknown }) : undefined;
+  return (answer as { chain_id?: unknown }).chain_id === network ? (answer as { tokens?: unknown }) : undefined;
 }
 
 // This merchant charges one fixed price, so it can build that charge once before serving.
@@ -447,7 +469,7 @@ async function main() {
   // and until this line nothing was logged until both finished — so a slow boot and
   // a dead process looked identical to the smoke tests ("merchant output: <empty>").
   console.log(
-    `MPP merchant starting (${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_URL}`})`,
+    `MPP merchant starting (${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_LABEL}`})`,
   );
   const { corridor, submitter } = await setup();
   const source = corridor.sources[0];
@@ -550,7 +572,7 @@ async function main() {
 
   server.listen(PORT, () => {
     console.log(`MPP merchant listening on http://localhost:${PORT}${RESOURCE_PREFIX}/<purchase id>`);
-    console.log(`Submitter: ${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_URL}`}`);
+    console.log(`Submitter: ${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_LABEL}`}`);
     if (USE_STUB_SUBMITTER) {
       console.log(
         `Trust source for the stub demo only: GET http://localhost:${PORT}/v1/defaults answers ` +

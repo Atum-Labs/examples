@@ -219,9 +219,9 @@ test("the readiness pattern still matches the merchant's own banner", () => {
 
 const STUB_ENV = { USE_STUB_SUBMITTER: "true" };
 
-// The shell's corridor variables reach the merchant (a devnet script exports them, for
-// one), so a test that depends on the shipped corridor removes them. An undefined value
-// drops the key from the child's env, letting the merchant fall back to its defaults.
+// Corridor variables exported in the shell reach the merchant, so a test that depends on
+// the shipped corridor removes them. An undefined value drops the key from the child's env,
+// letting the merchant fall back to its defaults.
 const UNSET_CORRIDOR = {
   SOURCE_NETWORK: undefined,
   SOURCE_ASSET: undefined,
