@@ -413,17 +413,65 @@ test("real mode refuses to start when the gateway's answer has no tokens field",
 
 const STUB_ENV = { USE_STUB_SUBMITTER: undefined };
 
-test("stub /v1/defaults does not vouch for sentinel corridor tokens it does not know", async () => {
+// The stub used to boot on unknown tokens and leave them out of /v1/defaults; it now
+// refuses at startup, because a stub that cannot describe the token it charges in would
+// issue a challenge no payer can price. The refusal names the token, its chain, and where
+// the stub's known tokens are listed — and never falls back to a placeholder symbol.
+
+function assertStubRefusesToken(
+  result: { exitCode: number; output: string },
+  chainId: string,
+  address: string,
+): void {
+  assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+  assert.ok(
+    result.output.toLowerCase().includes(address.toLowerCase()),
+    `the refusal must name the unknown token ${address}:\n${result.output}`,
+  );
+  assert.ok(result.output.includes(chainId), `the refusal must name its chain ${chainId}:\n${result.output}`);
+  assert.ok(result.output.includes("STUB_KNOWN_TOKENS"), `the refusal must say where to add the token:\n${result.output}`);
+  // \b keeps STUB_KNOWN_TOKENS from matching: `_` is a word character.
+  assert.doesNotMatch(result.output, /\bSTUB\b/, `no STUB placeholder symbol may appear:\n${result.output}`);
+}
+
+const SENTINEL_SOURCE_NETWORK = "eip155:999001";
+const SENTINEL_DEST_NETWORK = "eip155:999002";
+
+test("stub mode refuses to start on corridor tokens it does not know", async () => {
   // Deliberately not any real chain or token, so no table can know them.
   const corridor = {
-    SOURCE_NETWORK: "eip155:999001",
+    SOURCE_NETWORK: SENTINEL_SOURCE_NETWORK,
     SOURCE_ASSET: "0x00000000000000000000000000000000000000a1",
-    DEST_NETWORK: "eip155:999002",
+    DEST_NETWORK: SENTINEL_DEST_NETWORK,
     DEST_ASSET: "0x00000000000000000000000000000000000000b2",
   };
-  await withMerchant(4124, { ...STUB_ENV, ...corridor }, async ({ url }) => {
+  const result = await expectRefusalToStart(4124, { ...STUB_ENV, ...corridor });
+  assertStubRefusesToken(result, corridor.SOURCE_NETWORK, corridor.SOURCE_ASSET);
+});
+
+test("stub mode refuses to start when only the source token is unknown", async () => {
+  const corridor = {
+    SOURCE_NETWORK: SENTINEL_SOURCE_NETWORK,
+    SOURCE_ASSET: "0x00000000000000000000000000000000000000a1",
+    DEST_NETWORK: SENTINEL_DEST_NETWORK,
+    DEST_ASSET: REAL_DEST_ASSET,
+  };
+  const result = await expectRefusalToStart(4148, { ...STUB_ENV, ...corridor });
+  assertStubRefusesToken(result, corridor.SOURCE_NETWORK, corridor.SOURCE_ASSET);
+});
+
+test("stub mode knows its tokens by address, on any network", async () => {
+  // Known tokens on chains that do not exist: the table is keyed by address alone, so
+  // the stub boots and vouches for each with its real metadata.
+  const corridor = {
+    SOURCE_NETWORK: SENTINEL_SOURCE_NETWORK,
+    SOURCE_ASSET: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    DEST_NETWORK: SENTINEL_DEST_NETWORK,
+    DEST_ASSET: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  };
+  await withMerchant(4149, { ...STUB_ENV, ...corridor }, async ({ url }) => {
     const origin = new URL(url).origin;
-    for (const [chainId, asset] of [
+    for (const [chainId, address] of [
       [corridor.SOURCE_NETWORK, corridor.SOURCE_ASSET],
       [corridor.DEST_NETWORK, corridor.DEST_ASSET],
     ] as const) {
@@ -432,14 +480,10 @@ test("stub /v1/defaults does not vouch for sentinel corridor tokens it does not 
       assert.equal(res.status, 200, `/v1/defaults for ${chainId} must answer 200:\n${text}`);
       const d = JSON.parse(text) as GatewayDefaults;
       assert.ok(Array.isArray(d.tokens), `tokens must be an array:\n${text}`);
-      assert.ok(
-        !d.tokens.some((t) => typeof t.address === "string" && t.address.toLowerCase() === asset.toLowerCase()),
-        `an unknown token must not be listed for ${chainId}:\n${text}`,
-      );
-      assert.ok(
-        !d.tokens.some((t) => t.symbol === "STUB"),
-        `no token may carry an invented STUB symbol on ${chainId}:\n${text}`,
-      );
+      const token = d.tokens.find((t) => typeof t.address === "string" && t.address.toLowerCase() === address.toLowerCase());
+      assert.ok(token, `${chainId} must list ${address}:\n${text}`);
+      assert.strictEqual(token.symbol, "USDC", `${address} must be listed as USDC:\n${text}`);
+      assert.strictEqual(token.decimals, 6, `${address} must be listed with 6 decimals:\n${text}`);
     }
   });
 });

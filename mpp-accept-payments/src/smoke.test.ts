@@ -406,12 +406,15 @@ test("refuses to start in real-settlement mode without a valid DEST_ADDRESS", as
 // no chain: a sentinel corridor goes in, and the same sentinel must come back out of
 // the challenge the merchant issues. Stub mode contacts no gateway, so it runs anywhere.
 test("corridor overrides reach the challenge the merchant issues", async () => {
-  // Deliberately not any real chain or token: if the override were ignored, the
+  // The networks are deliberately not any real chain: if the override were ignored, the
   // assertions would report the shipped default rather than a plausible-looking value.
+  // The stub refuses a token it has no metadata for, so the assets are tokens it knows,
+  // each different from the shipped default on its leg (Base USDC instead of Base
+  // Sepolia USDC; Base Sepolia USDC instead of pathUSD) so the override stays visible.
   const SOURCE_NETWORK = "eip155:999001";
-  const SOURCE_ASSET = "0x00000000000000000000000000000000000000a1";
+  const SOURCE_ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
   const DEST_NETWORK = "eip155:999002";
-  const DEST_ASSET = "0x00000000000000000000000000000000000000b2";
+  const DEST_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
   await withMerchant(
     4091,
@@ -683,27 +686,53 @@ test("stub /v1/defaults keys token metadata by address, whatever its casing", as
   });
 });
 
-test("stub /v1/defaults does not vouch for metadata of an asset it does not know", async () => {
-  const unknownAsset = "0x00000000000000000000000000000000000000aa";
-  await withMerchant(4106, { ...STUB_ENV, ...UNSET_CORRIDOR, DEST_ASSET: unknownAsset }, async ({ url }) => {
-    const request = await fetchChallenge(url);
-    // Guard the premise: the assertions below only mean something if the override took.
-    assertSameAddress(request.extra.destination.asset, unknownAsset, "overridden destination asset");
-
-    // The roles are still vouched for: they do not depend on which token is paid out.
-    const destination = await assertDestinationDefaultsMatchChallenge(url, request);
-    // Inventing a symbol or decimals for an unknown token would let a payer trust a
-    // guess, so the token must be absent rather than listed with made-up metadata.
-    assert.equal(
-      findToken(destination, unknownAsset),
-      undefined,
-      `an unknown asset must not be listed:\n${JSON.stringify(destination, null, 2)}`,
-    );
-
-    // The known source leg is unaffected by an unknown destination.
-    const source = await assertSourceDefaultsMatchChallenge(url, request);
-    assertListsTokenAs(source, request.source.asset, "USDC", 6);
+// Resolves with the exit of a merchant expected to refuse to start, and rejects as soon as
+// it prints its listening banner instead, so a refusal that never comes fails fast rather
+// than hanging until the test runner's timeout.
+function startupRefusal(
+  port: number,
+  env: Record<string, string | undefined>,
+): Promise<{ exitCode: number; output: string }> {
+  const merchant = spawn(tsxBin(MERCHANT_DIR), ["src/merchant.ts"], {
+    cwd: MERCHANT_DIR,
+    env: { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV, PORT: String(port), ...env },
   });
+  let output = "";
+  merchant.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  merchant.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  merchant.on("error", () => {});
+  return new Promise((resolve, reject) => {
+    const watch = setInterval(() => {
+      if (merchantListening(port).test(output)) {
+        clearInterval(watch);
+        merchant.kill();
+        reject(new Error(`expected the merchant to refuse to start, but it is serving:\n${output}`));
+      }
+    }, 100);
+    merchant.once("exit", (code) => {
+      clearInterval(watch);
+      resolve({ exitCode: code ?? 1, output });
+    });
+  });
+}
+
+// The stub used to boot on an unknown token and leave it out of /v1/defaults; it now
+// refuses at startup instead, because a stub that cannot describe the token it charges in
+// would issue a challenge no payer can price. The refusal must say which token, on which
+// chain, and where the stub's known tokens are listed.
+test("stub mode refuses to start on a destination asset it does not know", async () => {
+  const unknownAsset = "0x00000000000000000000000000000000000000aa";
+  const destNetwork = "eip155:42431";
+  const result = await startupRefusal(4106, {
+    ...STUB_ENV,
+    ...UNSET_CORRIDOR,
+    DEST_NETWORK: destNetwork,
+    DEST_ASSET: unknownAsset,
+  });
+  assert.notEqual(result.exitCode, 0, `expected the merchant to refuse to start:\n${result.output}`);
+  assert.ok(result.output.includes(unknownAsset), `the refusal must name the unknown token ${unknownAsset}:\n${result.output}`);
+  assert.ok(result.output.includes(destNetwork), `the refusal must name its chain ${destNetwork}:\n${result.output}`);
+  assert.match(result.output, /STUB_KNOWN_TOKENS/, `the refusal must say where to add the token:\n${result.output}`);
 });
 
 test("stub /v1/defaults refuses chains outside its corridor and a missing chain_id", async () => {

@@ -135,17 +135,16 @@ const budgets = {
 // A static corridor for the offline demo. The escrow/role/proxy/verifier values are
 // placeholders the stub submitter accepts — real ones come from the gateway (see setup()).
 function stubCorridor(): AtumEscrowCorridor {
+  const sourceToken = stubTokenMetadata(SOURCE_NETWORK, SOURCE_ASSET);
+  const destToken = stubTokenMetadata(DEST_NETWORK, DEST_ASSET);
   return {
-    destination: { ...destination, ...stubTokenMetadata(DEST_ASSET) },
+    destination: { ...destination, ...destToken },
     fulfillmentProxy: "0x0000000000000000000000000000000000000007",
     ...budgets,
-    // A placeholder leg must count as the same money as the stub's known tokens, or a corridor
-    // with one unknown leg is refused before the demo can show the payer refusing it.
-    ...(usesStubPlaceholder() ? { pegGroups: [stubPegGroup()] } : {}),
     sources: [
       {
         network: SOURCE_NETWORK,
-        assets: [{ address: SOURCE_ASSET, ...stubTokenMetadata(SOURCE_ASSET) }],
+        assets: [{ address: SOURCE_ASSET, ...sourceToken }],
         escrow: "0x0000000000000000000000000000000000000004",
         reserver: "0x0000000000000000000000000000000000000005",
         releaser: "0x0000000000000000000000000000000000000006",
@@ -161,10 +160,9 @@ function stubCorridor(): AtumEscrowCorridor {
 // A real merchant never does: the payer's trust source must not be the party being paid.
 //
 // Token metadata is looked up by address, so a token keeps its own symbol and decimals in
-// whichever direction the corridor runs. The stub vouches only for tokens it knows: an
-// asset missing here is left out of its answer, and a payer then refuses the payment
-// rather than computing its spend cap on guessed decimals. Add a token here to run the
-// stub against it.
+// whichever direction the corridor runs. A token missing here stops the stub at startup, as
+// an unlisted token stops real mode: there are no decimals to price its spend cap with. Add
+// a token here to run the stub against it.
 interface StubChainDefaults {
   chain_id: string;
   escrow_contract: string;
@@ -185,23 +183,15 @@ function stubToken(address: string): StubChainDefaults["tokens"][number] | undef
   return known && { ...known, address };
 }
 
-// The stub corridor still needs metadata for a token the table does not know, so the
-// challenge can be built. The placeholder stays out of stubChainDefaults: the stub never
-// vouches for it, so a payer still refuses to pay that token.
-const STUB_PLACEHOLDER: TokenMetadata = { symbol: "STUB", decimals: 6 };
-
-function stubTokenMetadata(address: string): TokenMetadata {
-  return STUB_KNOWN_TOKENS.get(address.toLowerCase()) ?? STUB_PLACEHOLDER;
-}
-
-function usesStubPlaceholder(): boolean {
-  return [SOURCE_ASSET, DEST_ASSET].some((a) => !STUB_KNOWN_TOKENS.has(a.toLowerCase()));
-}
-
-// The stub's own money: every token it knows, plus the placeholder.
-function stubPegGroup(): string[] {
-  const symbols = new Set([...STUB_KNOWN_TOKENS.values()].map((t) => t.symbol));
-  return [...symbols, STUB_PLACEHOLDER.symbol];
+function stubTokenMetadata(network: string, address: string): TokenMetadata {
+  const known = STUB_KNOWN_TOKENS.get(address.toLowerCase());
+  if (!known) {
+    throw new Error(
+      `stub mode doesn't know token ${address} on ${network}; add it to STUB_KNOWN_TOKENS in ` +
+        `src/merchant.ts to run the stub against it`,
+    );
+  }
+  return known;
 }
 
 // Built from the same corridor the challenge advertises, so the two cannot disagree.
