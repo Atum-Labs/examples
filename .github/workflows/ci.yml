@@ -62,5 +62,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check for retired service hosts
+        run: scripts/check-host-literals.sh
+
       - name: Smoke tests
         run: npm test
