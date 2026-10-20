@@ -51,6 +51,12 @@ Confirm the `402 → pay → 200` wiring locally before touching funded settleme
 
 The examples install `@atumlabs/x402-atum-escrow`, `@atumlabs/mppx-atum-escrow`, and `@atumlabs/payment-gateway-client` from public npm — no org invite.
 
+### Host defaults
+
+Do not hardcode a gateway or facilitator URL in example source. `pgc-make-payments` uses the published client's `defaultGateway` (`GATEWAY_URL` still overrides it for a local run). The table above is a snapshot of today's testnet hosts for humans; if it disagrees with the published client, follow the client.
+
+CI runs `scripts/check-host-literals.sh` and fails if a reachable `atum.network` or `atumlabs.xyz` URL is checked in. After you change a host in the published client, bump the `@atumlabs/payment-gateway-client` version here — this repo does not read protocol's `hosts.yaml`.
+
 ### Node.js
 
 **Node.js 20+** is the floor; CI covers 20, 22, and 24. On Node 20, MPP installs print `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22` — install and stub runs still succeed, and Node 22+ silences it. The x402 apps are unaffected.
