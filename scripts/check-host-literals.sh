@@ -3,10 +3,11 @@
 #
 #   scripts/check-host-literals.sh [path...]
 #
-# Scans for https://…atum.network and https://…atumlabs.xyz. Bare mentions
-# (changelog / "deprecated" prose) are allowed. did:web: identifiers are
-# stripped before the scan. After the protocol client that exports `hosts`
-# is published, widen this to require SSOT URLs only (CORE-3184).
+# Scans for http(s):// and wss:// …atum.network / …atumlabs.xyz. Bare mentions
+# (changelog / "deprecated" prose) are allowed. Only the did:web: token is
+# stripped, not the whole line — a retired URL next to an issuer DID still
+# fails. After the protocol client that exports `hosts` is published, widen
+# this to require SSOT URLs only (CORE-3184).
 set -euo pipefail
 
 TARGETS=("$@")
@@ -23,10 +24,12 @@ done
 
 EXCLUDES=(--exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude="$SELF")
 
-hits="$(grep -rnE "${EXCLUDES[@]}" -- 'https?://[^[:space:]"'\'']*(atum\.network|atumlabs\.xyz)' "${TARGETS[@]}" || true)"
-# Strip did:web: lines so the corporate issuer identity is not a finding.
+URL_RE='(https?|wss?)://[^[:space:]"'\'']*(atum\.network|atumlabs\.xyz)'
+hits="$(grep -rnE "${EXCLUDES[@]}" -- "$URL_RE" "${TARGETS[@]}" || true)"
+# Remove only the DID token. Dropping the whole line hid a retired URL that
+# sat next to did:web:atumlabs.xyz.
 if [ -n "$hits" ]; then
-  hits="$(printf '%s\n' "$hits" | grep -v 'did:web:' || true)"
+  hits="$(printf '%s\n' "$hits" | sed -E 's/did:web:[^[:space:]"'\'',]*//g' | grep -E "$URL_RE" || true)"
 fi
 
 if [ -n "$hits" ]; then
