@@ -106,13 +106,17 @@ export async function payPurchase(
     if (settle.success) {
       const confirm = settle.fulfillmentConfirmation;
       console.log(settledAfter(i, paymentId ? `— payment ${paymentId}` : undefined));
-      logArrival({
-        destNetwork: confirm?.destination_chain_id,
-        destHash: confirm?.destination_tx_hash,
-        sourceNetwork: confirm?.source_chain_id,
-        sourceHash: confirm?.source_tx_hash,
-        stub: Boolean(confirm?.stub),
-      });
+      if (confirm?.destination_chain_id || confirm?.destination_tx_hash) {
+        logArrival({
+          destNetwork: confirm.destination_chain_id,
+          destHash: confirm.destination_tx_hash,
+          sourceNetwork: confirm.source_chain_id,
+          sourceHash: confirm.source_tx_hash,
+          stub: Boolean(confirm.stub),
+        });
+      } else {
+        console.log("   Destination  settlement details unavailable (no fulfillment confirmation)");
+      }
       return response;
     }
 

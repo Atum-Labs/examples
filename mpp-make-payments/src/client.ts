@@ -8,11 +8,17 @@ import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
 import { Receipt } from "mppx";
 import { Mppx } from "mppx/client";
-import { registerClient, ensureSourceApproval, type AtumEscrowChallenge } from "@atumlabs/mppx-atum-escrow/client";
+import {
+  registerClient,
+  ensureSourceApproval,
+  atumGatewayTrust,
+  type AtumEscrowChallenge,
+} from "@atumlabs/mppx-atum-escrow/client";
 import { payPurchase } from "./purchase.js";
 import { banner, line, logArrival } from "./display.js";
 
-const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID } = process.env;
+const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
+  process.env;
 
 // A stub run needs a well-formed key, not a funded one: the payment is signed offline and
 // never touches a chain. So rather than stop a first run to go and produce a key, generate
@@ -56,15 +62,27 @@ const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(pur
 // whose deposit signature does not recover to this account, so the two must match.
 const account = new ethers.Wallet(privateKey).address;
 
-banner("MPP payer", PRIVATE_KEY ? "real settlement" : "stub  ·  no funds");
+// RPC_URL is what marks a real settlement (a chain to approve on). A supplied
+// PRIVATE_KEY only chooses the signer — it can still pay a stub merchant.
+banner("MPP payer", RPC_URL ? "real settlement" : "stub  ·  no funds");
 
 if (!PRIVATE_KEY) {
   line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
 }
 
+// Before signing, the client checks the escrow and roles the merchant's challenge names
+// against an Atum gateway this payer trusts, and refuses a payment through any other. Which
+// gateway is the payer's choice and never comes from the challenge: Atum's production
+// gateways by default, or GATEWAY_URL — a local devnet, or the stub merchant, which answers
+// for its own placeholder corridor.
+// An empty GATEWAY_URL (a blank line in .env) means unset.
+const gatewayUrl = GATEWAY_URL || undefined;
+const trust = gatewayUrl ? atumGatewayTrust({ gateways: [gatewayUrl] }) : undefined;
+console.log(`Trusting the corridors vouched for by ${gatewayUrl ?? "Atum's production gateways"}.`);
+
 // Register `atum-escrow` on the mppx client. The private key is bound to the
 // challenge's source chain automatically, so one registration pays any supported source.
-const method = registerClient({ signer: { privateKey }, account });
+const method = registerClient({ signer: { privateKey }, account, ...(trust ? { trust } : {}) });
 const mppx = Mppx.create({ methods: [method] });
 
 /**
@@ -129,17 +147,15 @@ if (RPC_URL) {
   });
 }
 
-/**
- * One attempt at the purchase: ask for the resource, sign a credential for the challenge
- * it answers with, and resubmit. `mppx.rawFetch` bypasses mppx's own automatic 402
- * handling so the re-attempt loop in ./purchase.ts drives the pacing.
- *
- * Every attempt signs a NEW credential, because the challenge's deadlines are absolute
- * timestamps. The purchase identifier is what stays fixed, and it comes from the URL.
- */
+const STUB_DEST_HASH = `0x${"22".repeat(32)}`;
+
+function logUnavailable(reason: string): void {
+  console.log(`   Destination  settlement details unavailable (${reason})`);
+}
+
 function logArrivalFromReceipt(header: string | null): void {
   if (!header) {
-    logArrival({});
+    logUnavailable("no receipt");
     return;
   }
   try {
@@ -152,19 +168,31 @@ function logArrivalFromReceipt(header: string | null): void {
       };
     };
     const c = receipt.fulfillmentConfirmation;
-    const destHash = c?.destination_tx_hash;
+    if (!c || (!c.destination_chain_id && !c.destination_tx_hash)) {
+      logUnavailable("no fulfillment confirmation");
+      return;
+    }
+    const destHash = c.destination_tx_hash;
     logArrival({
-      destNetwork: c?.destination_chain_id,
+      destNetwork: c.destination_chain_id,
       destHash,
-      sourceNetwork: c?.source_chain_id,
-      sourceHash: c?.source_tx_hash,
-      stub: !destHash || destHash === `0x${"22".repeat(32)}`,
+      sourceNetwork: c.source_chain_id,
+      sourceHash: c.source_tx_hash,
+      stub: !destHash || destHash === STUB_DEST_HASH,
     });
   } catch {
-    logArrival({});
+    logUnavailable("unreadable receipt");
   }
 }
 
+/**
+ * One attempt at the purchase: ask for the resource, sign a credential for the challenge
+ * it answers with, and resubmit. `mppx.rawFetch` bypasses mppx's own automatic 402
+ * handling so the re-attempt loop in ./purchase.ts drives the pacing.
+ *
+ * Every attempt signs a NEW credential, because the challenge's deadlines are absolute
+ * timestamps. The purchase identifier is what stays fixed, and it comes from the URL.
+ */
 async function attemptPurchase(): Promise<Response> {
   const challengeResponse = await mppx.rawFetch(resourceUrl);
   if (challengeResponse.status !== 402) return challengeResponse;
@@ -182,7 +210,11 @@ try {
   const receipt = response.headers.get("payment-receipt");
   const body = await response.json().catch(() => response.text());
 
-  logArrivalFromReceipt(receipt);
+  if (response.ok) {
+    logArrivalFromReceipt(receipt);
+  } else {
+    logUnavailable(`HTTP ${response.status}`);
+  }
   console.log(`Status: ${response.status}`);
   if (receipt) console.log("Payment-Receipt header: present");
   console.log(JSON.stringify(body, null, 2));
