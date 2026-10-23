@@ -58,9 +58,13 @@ export function formatAmount(atomic: string, decimals = 6): string {
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
-export function banner(product: string, mode: string): void {
+export function banner(product: string, mode?: string): void {
   console.log("");
-  console.log(`⚡  ${style.bold("ATUM")} · ${product} · ${style.dim(mode)}`);
+  console.log(
+    mode
+      ? `⚡  ${style.bold("ATUM")} · ${product} · ${style.dim(mode)}`
+      : `⚡  ${style.bold("ATUM")} · ${product}`,
+  );
 }
 
 export function successBanner(message: string): void {

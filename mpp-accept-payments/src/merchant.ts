@@ -248,7 +248,7 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
         return { payment_id: paymentId, status: "pending" };
       }
 
-      const confirmation: FulfillmentConfirmation = {
+      const confirmation: FulfillmentConfirmation & { stub: true } = {
         payment_id: paymentId,
         request_id: requestId,
         fulfillment_timestamp: new Date().toISOString(),
@@ -256,6 +256,7 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
         destination_chain_id: corridor.destination.network,
         source_tx_hash: `0x${"11".repeat(32)}`,
         destination_tx_hash: `0x${"22".repeat(32)}`,
+        stub: true,
       };
       return { payment_id: paymentId, status: "completed", fulfillment_confirmation: confirmation };
     },

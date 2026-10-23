@@ -54,9 +54,9 @@ const purchaseId = PURCHASE_ID || `order_${randomBytes(10).toString("hex")}`;
 
 const wallet = new ethers.Wallet(privateKey);
 
-// RPC_URL is what marks a real settlement (a chain to approve on). A supplied
-// PRIVATE_KEY only chooses the signer — it can still pay a stub merchant.
-banner("x402 payer", RPC_URL ? "real settlement" : "stub  ·  no funds");
+// Banner stays neutral. RPC_URL only means "there is a chain to approve on"; the
+// merchant may still be a stub. The receipt line is what carries stub vs real.
+banner("x402 payer");
 
 if (!PRIVATE_KEY) {
   line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${wallet.address}).`);

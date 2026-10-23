@@ -68,6 +68,7 @@ function successfulReceipt(): string {
     timestamp: new Date().toISOString(),
     reference: "pay_stub_output",
     fulfillmentConfirmation: {
+      stub: true,
       destination_chain_id: "eip155:42431",
       destination_tx_hash: `0x${"22".repeat(32)}`,
       source_chain_id: "eip155:84532",
@@ -101,7 +102,7 @@ test("an HTTP 400 with no receipt does not claim destination arrival", async () 
   );
 });
 
-test("a successful stub receipt prints destination arrival and not real settlement", async () => {
+async function assertStubArrivalWithoutRealBanner(env: Record<string, string>): Promise<void> {
   await withStub(
     (_req, res) => {
       res.writeHead(200, {
@@ -114,21 +115,88 @@ test("a successful stub receipt prints destination arrival and not real settleme
       const result = await runClient({
         PRIVATE_KEY: randomPrivateKey(),
         MERCHANT_URL: url,
-        RPC_URL: "",
         GATEWAY_URL: "",
+        ...env,
       });
       assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
       assert.match(result.output, /Status: 200/, `expected a 200 response:\n${result.output}`);
       assert.doesNotMatch(
         result.output,
-        /MPP payer · real settlement/,
-        `a supplied key against the stub must not print real settlement:\n${result.output}`,
+        /real settlement/,
+        `banner must not claim real settlement before the receipt:\n${result.output}`,
       );
       assert.match(
         result.output,
         /Destination  Tempo \(Moderato\) pathUSD — arrived \(stub\)/,
         `expected stub destination arrival:\n${result.output}`,
       );
+    },
+  );
+}
+
+test("a successful stub receipt prints destination arrival and not real settlement", async () => {
+  await assertStubArrivalWithoutRealBanner({ RPC_URL: "" });
+});
+
+test("RPC_URL set against a stub merchant does not print real settlement", async () => {
+  // Existing regressions used RPC_URL: "", so a banner keyed off RPC_URL still passed.
+  await assertStubArrivalWithoutRealBanner({ RPC_URL: "http://127.0.0.1:1" });
+});
+
+test("a 200 with no receipt does not print Payment settled", async () => {
+  await withStub(
+    (_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: "fulfilled" }));
+    },
+    async (url) => {
+      const result = await runClient({
+        PRIVATE_KEY: randomPrivateKey(),
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: "",
+      });
+      assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+      assert.match(
+        result.output,
+        /Destination  settlement details unavailable \(no receipt\)/,
+        `expected unavailable settlement details:\n${result.output}`,
+      );
+      assert.doesNotMatch(result.output, /Payment settled/, `200 with no receipt must not print settled:\n${result.output}`);
+      assert.doesNotMatch(result.output, /arrived/, `200 with no receipt must not claim arrival:\n${result.output}`);
+    },
+  );
+});
+
+test("a real confirmation without a dest hash is not labelled stub", async () => {
+  const header = Receipt.serialize({
+    method: "atum-escrow",
+    status: "success",
+    timestamp: new Date().toISOString(),
+    reference: "pay_real_no_hash",
+    fulfillmentConfirmation: {
+      destination_chain_id: "eip155:42431",
+      source_chain_id: "eip155:84532",
+    },
+  } as Receipt.Receipt);
+  await withStub(
+    (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "payment-receipt": header,
+      });
+      res.end(JSON.stringify({ status: "fulfilled" }));
+    },
+    async (url) => {
+      const result = await runClient({
+        PRIVATE_KEY: randomPrivateKey(),
+        MERCHANT_URL: url,
+        RPC_URL: "",
+        GATEWAY_URL: "",
+      });
+      assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+      assert.match(result.output, /arrived/, `expected arrival from dest chain:\n${result.output}`);
+      assert.doesNotMatch(result.output, /arrived \(stub\)/, `missing dest hash must not imply stub:\n${result.output}`);
     },
   );
 });

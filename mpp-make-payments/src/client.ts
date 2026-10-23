@@ -15,7 +15,7 @@ import {
   type AtumEscrowChallenge,
 } from "@atumlabs/mppx-atum-escrow/client";
 import { payPurchase } from "./purchase.js";
-import { banner, line, logArrival } from "./display.js";
+import { banner, line, logArrival, settledAfter } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
   process.env;
@@ -62,9 +62,9 @@ const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(pur
 // whose deposit signature does not recover to this account, so the two must match.
 const account = new ethers.Wallet(privateKey).address;
 
-// RPC_URL is what marks a real settlement (a chain to approve on). A supplied
-// PRIVATE_KEY only chooses the signer — it can still pay a stub merchant.
-banner("MPP payer", RPC_URL ? "real settlement" : "stub  ·  no funds");
+// Banner stays neutral. RPC_URL only means "there is a chain to approve on"; the
+// merchant may still be a stub. The receipt line is what carries stub vs real.
+banner("MPP payer");
 
 if (!PRIVATE_KEY) {
   line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
@@ -147,20 +147,25 @@ if (RPC_URL) {
   });
 }
 
-const STUB_DEST_HASH = `0x${"22".repeat(32)}`;
-
 function logUnavailable(reason: string): void {
   console.log(`   Destination  settlement details unavailable (${reason})`);
 }
 
-function logArrivalFromReceipt(header: string | null): void {
+function confirmationFromReceipt(header: string | null): {
+  stub?: boolean;
+  destination_chain_id?: string;
+  destination_tx_hash?: string;
+  source_chain_id?: string;
+  source_tx_hash?: string;
+} | undefined {
   if (!header) {
     logUnavailable("no receipt");
-    return;
+    return undefined;
   }
   try {
     const receipt = Receipt.deserialize(header) as {
       fulfillmentConfirmation?: {
+        stub?: boolean;
         destination_chain_id?: string;
         destination_tx_hash?: string;
         source_chain_id?: string;
@@ -170,18 +175,12 @@ function logArrivalFromReceipt(header: string | null): void {
     const c = receipt.fulfillmentConfirmation;
     if (!c || (!c.destination_chain_id && !c.destination_tx_hash)) {
       logUnavailable("no fulfillment confirmation");
-      return;
+      return undefined;
     }
-    const destHash = c.destination_tx_hash;
-    logArrival({
-      destNetwork: c.destination_chain_id,
-      destHash,
-      sourceNetwork: c.source_chain_id,
-      sourceHash: c.source_tx_hash,
-      stub: !destHash || destHash === STUB_DEST_HASH,
-    });
+    return c;
   } catch {
     logUnavailable("unreadable receipt");
+    return undefined;
   }
 }
 
@@ -211,7 +210,17 @@ try {
   const body = await response.json().catch(() => response.text());
 
   if (response.ok) {
-    logArrivalFromReceipt(receipt);
+    const confirm = confirmationFromReceipt(receipt);
+    if (confirm) {
+      console.log(settledAfter(1));
+      logArrival({
+        destNetwork: confirm.destination_chain_id,
+        destHash: confirm.destination_tx_hash,
+        sourceNetwork: confirm.source_chain_id,
+        sourceHash: confirm.source_tx_hash,
+        stub: Boolean(confirm.stub),
+      });
+    }
   } else {
     logUnavailable(`HTTP ${response.status}`);
   }

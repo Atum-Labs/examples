@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { settledAfter } from "./display.js";
-
 // Re-attempting a purchase until it reaches a terminal outcome.
 //
 // Cross-chain settlement can take longer than the Atum gateway holds a connection open
@@ -83,7 +81,8 @@ export async function payPurchase(
     const response = await attempt();
 
     if (response.ok) {
-      console.log(settledAfter(i, paymentId ? `— payment ${paymentId}` : undefined));
+      // Do not print "Payment settled." here: a 200 can still have no receipt.
+      // client.ts prints that line after it reads a usable confirmation.
       return response;
     }
 
