@@ -16,6 +16,7 @@ import {
   isGatewayTimeoutError,
   isTerminalStatus,
   assetChainId,
+  defaultGateway,
   type FulfillmentConfirmation,
 } from "@atumlabs/payment-gateway-client";
 import { collectPayment } from "./purchase.js";
@@ -35,9 +36,6 @@ const {
   DEST_ASSET = "0x20c0000000000000000000000000000000000000",
   FULFILLMENT_AMOUNT = "50000",
 } = process.env;
-
-// Same hosted testnet gateway as mpp-accept-payments and x402-accept-payments.
-const DEFAULT_GATEWAY = "https://payment-gw.production-testnet.atum.xyz";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -214,7 +212,8 @@ async function main(): Promise<void> {
         settleAs: process.env.STUB_SETTLE_AS === "failed" ? "failed" : "completed",
       })
     : undefined;
-  const gatewayUrl = stub?.url ?? (GATEWAY_URL || DEFAULT_GATEWAY);
+  // Comes from the published client so a host change is not a second literal here.
+  const gatewayUrl = stub?.url ?? (GATEWAY_URL || defaultGateway);
   const client = new PaymentGatewayClient({ BASE: gatewayUrl });
 
   try {
