@@ -30,10 +30,13 @@ x402 and MPP collect a slow settlement by re-attempting the purchase (a fresh 40
 [`src/purchase.ts`](src/purchase.ts) waits:
 
 ```
-Preparing eip155:84532/erc20:0x036C… → eip155:42431/erc20:0x20c0… via http://127.0.0.1:… …
-Request pmt_f45bb75a9adc49258f64 — to re-attempt it: REQUEST_ID=pmt_f45bb75a9adc49258f64 npm run pay
-  still settling — waiting for a terminal status
-  settled — payment pay_stub_…
+🎯  Request pmt_f45bb75a9adc49258f64
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
+📡  Requesting payment via stub gateway
+  ⏳  still settling — waiting
+  ✅  Payment settled. — payment pay_stub_…
+   Destination  Tempo (Moderato) pathUSD — arrived (stub)
+Status: completed
 ```
 
 The `request_id` is required, and the SDK will not invent one. An id the library chose is an id you cannot reuse on a retry. This example generates one per run and prints it.
@@ -95,16 +98,14 @@ npm run pay
 Expected output on the stub:
 
 ```
-No PRIVATE_KEY set — signing this stub run with a throwaway key (0x…).
-It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.
-Preparing eip155:84532/erc20:0x036CbD53842c5426634e7929541eC2318f3dCF7e → eip155:42431/erc20:0x20c0000000000000000000000000000000000000 via http://127.0.0.1:… …
-Request pmt_f45bb75a9adc49258f64 — to re-attempt it: REQUEST_ID=pmt_f45bb75a9adc49258f64 npm run pay
-  settled — payment pay_stub_0000000000000000
-{
-  "payment_id": "pay_stub_0000000000000000",
-  "status": "completed",
-  "confirmation": { ... }
-}
+⚡  ATUM · Payment Gateway client · stub  ·  no funds
+🔑  No PRIVATE_KEY set — signing this stub run with a throwaway key (0x…).
+🎯  Request pmt_f45bb75a9adc49258f64
+🛣️  0.05 pathUSD  ·  Base Sepolia USDC → Tempo (Moderato) pathUSD
+📡  Requesting payment via stub gateway
+  ✅  Payment settled. — payment pay_stub_0000000000000000
+   Destination  Tempo (Moderato) pathUSD — arrived (stub)
+Status: completed
 ```
 
 To watch the wait that resolves a slow settlement, run with `STUB_PENDING_ATTEMPTS=2` — no funds, no gateway.
@@ -213,6 +214,7 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 ```
 src/
 ├── client.ts        # prepare → sign → submit → collect
+├── display.ts       # Shared terminal chrome (banner, corridor, amount)
 ├── purchase.ts      # waitForTerminalStatus until the payment is terminal
 └── stub-gateway.ts  # in-process gateway for stub runs and smoke tests
 ```

@@ -71,10 +71,10 @@ const STUB_ENV = {
 test("stub flow: prepare -> sign -> submit -> completed", async () => {
   const result = await runClient({ ...STUB_ENV, PRIVATE_KEY: randomPrivateKey() });
   assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
-  assert.match(result.output, /settled — payment pay_stub_/, `expected a settled payment:\n${result.output}`);
+  assert.match(result.output, /settled\. — payment pay_stub_/, `expected a settled payment:\n${result.output}`);
   assert.match(
     result.output,
-    /Request pmt_[0-9a-f]{20} — to re-attempt it/,
+    /Request pmt_[0-9a-f]{20}/,
     `expected a generated request id:\n${result.output}`,
   );
 });
@@ -87,7 +87,7 @@ test("a still-settling payment is collected by waiting on the same request id", 
   });
   assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
   assert.match(result.output, /still settling/, `expected the pending wait to be reported:\n${result.output}`);
-  assert.match(result.output, /settled — payment pay_stub_/, `expected the wait to settle:\n${result.output}`);
+  assert.match(result.output, /settled\. — payment pay_stub_/, `expected the wait to settle:\n${result.output}`);
 });
 
 // A payment can fail without ever being merely "pending" — the gateway settles it
@@ -118,7 +118,7 @@ test("resuming a payment reuses its request id instead of generating a new one",
   assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
   assert.match(
     result.output,
-    new RegExp(`Request ${requestId} — to re-attempt it`),
+    new RegExp(`Request ${requestId}`),
     `REQUEST_ID must name the payment verbatim:\n${result.output}`,
   );
 });
@@ -197,7 +197,7 @@ test("a payment interrupted mid-poll is resumed via REQUEST_ID and hands back th
       /handed back existing payment .* — nothing additional was charged/,
       `expected the gateway's idempotent replay to be reported, not a fresh charge:\n${resumed.output}`,
     );
-    assert.match(resumed.output, /settled — payment pay_stub_/, `expected the resumed run to settle:\n${resumed.output}`);
+    assert.match(resumed.output, /settled\. — payment pay_stub_/, `expected the resumed run to settle:\n${resumed.output}`);
     assert.deepEqual(
       stub.submitted(),
       [requestId, requestId],
@@ -214,7 +214,7 @@ test("a payment interrupted mid-poll is resumed via REQUEST_ID and hands back th
 test("stub run with no PRIVATE_KEY signs with a generated throwaway key", async () => {
   const result = await runClient({ ...STUB_ENV, PRIVATE_KEY: "" });
   assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
-  assert.match(result.output, /settled — payment pay_stub_/, `expected a settled payment:\n${result.output}`);
+  assert.match(result.output, /settled\. — payment pay_stub_/, `expected a settled payment:\n${result.output}`);
   assert.match(
     result.output,
     /No PRIVATE_KEY set — signing this stub run with a throwaway key \(0x[0-9a-fA-F]{40}\)/,
@@ -274,7 +274,7 @@ function runStubWithAmounts(amounts: Partial<Record<(typeof AMOUNT_VARS)[number]
   });
 }
 
-const SETTLED = /settled — payment pay_stub_/;
+const SETTLED = /settled\. — payment pay_stub_/;
 
 // The spend cap is signed into the Permit2, so it must be a deliberate choice. Once the
 // payer moves off the default fulfillment amount, any cap derived for them would be a

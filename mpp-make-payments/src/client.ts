@@ -6,6 +6,7 @@
 import "dotenv/config";
 import { randomBytes } from "node:crypto";
 import { ethers } from "ethers";
+import { Receipt } from "mppx";
 import { Mppx } from "mppx/client";
 import {
   registerClient,
@@ -14,6 +15,7 @@ import {
   type AtumEscrowChallenge,
 } from "@atumlabs/mppx-atum-escrow/client";
 import { payPurchase } from "./purchase.js";
+import { banner, line, logArrival, settledAfter } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
   process.env;
@@ -60,9 +62,12 @@ const resourceUrl = `${MERCHANT_URL.replace(/\/$/, "")}/${encodeURIComponent(pur
 // whose deposit signature does not recover to this account, so the two must match.
 const account = new ethers.Wallet(privateKey).address;
 
+// Banner stays neutral. RPC_URL only means "there is a chain to approve on"; the
+// merchant may still be a stub. The receipt line is what carries stub vs real.
+banner("MPP payer");
+
 if (!PRIVATE_KEY) {
-  console.log(`No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
-  console.log("It holds no funds and is discarded on exit. Set PRIVATE_KEY in .env to settle for real.");
+  line("🔑", `No PRIVATE_KEY set — signing this stub run with a throwaway key (${account}).`);
 }
 
 // Before signing, the client checks the escrow and roles the merchant's challenge names
@@ -133,13 +138,50 @@ if (RPC_URL) {
     });
     console.log(
       result.alreadySufficient
-        ? "Source token already approved."
-        : `Approved source token (tx ${result.txHash}).`,
+        ? "✅  Source token already approved."
+        : `✍️  Approved source token (tx ${result.txHash}).`,
     );
     // Return nothing: this handler only approves as a side effect. Returning a string
     // here would override mppx's credential creation, which we don't want.
     return undefined;
   });
+}
+
+function logUnavailable(reason: string): void {
+  console.log(`   Destination  settlement details unavailable (${reason})`);
+}
+
+function confirmationFromReceipt(header: string | null): {
+  stub?: boolean;
+  destination_chain_id?: string;
+  destination_tx_hash?: string;
+  source_chain_id?: string;
+  source_tx_hash?: string;
+} | undefined {
+  if (!header) {
+    logUnavailable("no receipt");
+    return undefined;
+  }
+  try {
+    const receipt = Receipt.deserialize(header) as {
+      fulfillmentConfirmation?: {
+        stub?: boolean;
+        destination_chain_id?: string;
+        destination_tx_hash?: string;
+        source_chain_id?: string;
+        source_tx_hash?: string;
+      };
+    };
+    const c = receipt.fulfillmentConfirmation;
+    if (!c || (!c.destination_chain_id && !c.destination_tx_hash)) {
+      logUnavailable("no fulfillment confirmation");
+      return undefined;
+    }
+    return c;
+  } catch {
+    logUnavailable("unreadable receipt");
+    return undefined;
+  }
 }
 
 /**
@@ -157,9 +199,8 @@ async function attemptPurchase(): Promise<Response> {
   return mppx.rawFetch(resourceUrl, { headers: { Authorization: credential } });
 }
 
-console.log(`Requesting ${resourceUrl} …`);
-const gatewayPrefix = gatewayUrl ? `GATEWAY_URL=${gatewayUrl} ` : "";
-console.log(`Purchase ${purchaseId} — to re-attempt it: ${gatewayPrefix}PURCHASE_ID=${purchaseId} npm run pay`);
+line("🎯", `Purchase ${purchaseId}`);
+line("📡", `Requesting resource: ${resourceUrl}`);
 
 try {
   // Re-attempts while settlement is still in flight. Cross-chain settlement can outrun
@@ -168,8 +209,23 @@ try {
   const receipt = response.headers.get("payment-receipt");
   const body = await response.json().catch(() => response.text());
 
+  if (response.ok) {
+    const confirm = confirmationFromReceipt(receipt);
+    if (confirm) {
+      console.log(settledAfter(1));
+      logArrival({
+        destNetwork: confirm.destination_chain_id,
+        destHash: confirm.destination_tx_hash,
+        sourceNetwork: confirm.source_chain_id,
+        sourceHash: confirm.source_tx_hash,
+        stub: Boolean(confirm.stub),
+      });
+    }
+  } else {
+    logUnavailable(`HTTP ${response.status}`);
+  }
   console.log(`Status: ${response.status}`);
-  console.log(`Payment-Receipt header: ${receipt ? "present" : "(none)"}`);
+  if (receipt) console.log("Payment-Receipt header: present");
   console.log(JSON.stringify(body, null, 2));
   if (!response.ok) process.exit(1);
 } catch (err) {

@@ -62,10 +62,10 @@ RUN_REAL_E2E=1 \
 On success the merchant logs the two transactions that constitute the proof:
 
 ```
-  settled payment 0x<payment id>
-    source deposit:     https://sepolia.basescan.org/tx/0x…   (Base Sepolia USDC into escrow)
-    destination payout: https://explore.testnet.tempo.xyz/tx/0x…   (Tempo pathUSD to your address)
-[…] → 200: settled, serving resource
+✅  → 200: settled — payment 0x<payment id>
+   Destination  Tempo (Moderato) pathUSD — arrived
+   destination payout: https://explore.testnet.tempo.xyz/tx/0x…   (Tempo pathUSD to your address)
+   source deposit:     https://sepolia.basescan.org/tx/0x…   (Base Sepolia USDC into escrow)
 ```
 
 Prefer to watch it by hand instead of via the test? Run the two apps in separate terminals:

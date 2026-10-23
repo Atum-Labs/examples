@@ -21,6 +21,7 @@ import {
 } from "@atumlabs/mppx-atum-escrow/server";
 import type { PaymentGatewayClient } from "@atumlabs/payment-gateway-client";
 import { PaymentLedger } from "./payments.js";
+import { assetName, banner, corridorLabel, formatAmount, logArrival } from "./display.js";
 
 const PORT = Number(process.env.PORT ?? 4030);
 
@@ -247,7 +248,7 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
         return { payment_id: paymentId, status: "pending" };
       }
 
-      const confirmation: FulfillmentConfirmation = {
+      const confirmation: FulfillmentConfirmation & { stub: true } = {
         payment_id: paymentId,
         request_id: requestId,
         fulfillment_timestamp: new Date().toISOString(),
@@ -255,32 +256,24 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
         destination_chain_id: corridor.destination.network,
         source_tx_hash: `0x${"11".repeat(32)}`,
         destination_tx_hash: `0x${"22".repeat(32)}`,
+        stub: true,
       };
       return { payment_id: paymentId, status: "completed", fulfillment_confirmation: confirmation };
     },
   };
 }
 
-// Block explorers for the chains this corridor uses, so settlement logs print
-// clickable tx links instead of bare hashes. Any chain not listed falls back to
-// the raw hash plus its CAIP-2 id.
-const TX_EXPLORERS: Record<string, string> = {
-  "eip155:84532": "https://sepolia.basescan.org/tx/", // Base Sepolia
-  "eip155:42431": "https://explore.testnet.tempo.xyz/tx/", // Tempo Moderato
-};
-
-function txLink(chainId: string | undefined, hash: string | undefined): string {
-  if (!hash) return "(none)";
-  const base = chainId ? TX_EXPLORERS[chainId] : undefined;
-  return base ? `${base}${hash}` : `${hash}${chainId ? ` (${chainId})` : ""}`;
-}
-
-// Where the money moved: the source-chain escrow deposit and the destination payout.
+// Where the money moved: destination arrival (same line stub or real), plus tx links when real.
 function logSettlement(confirmation: FulfillmentConfirmation | undefined): void {
   if (!confirmation) return;
-  console.log(`  settled payment ${confirmation.payment_id}`);
-  console.log(`    source deposit:     ${txLink(confirmation.source_chain_id, confirmation.source_tx_hash)}`);
-  console.log(`    destination payout: ${txLink(confirmation.destination_chain_id, confirmation.destination_tx_hash)}`);
+  logArrival({
+    destNetwork: confirmation.destination_chain_id ?? DEST_NETWORK,
+    destAsset: DEST_ASSET,
+    destHash: confirmation.destination_tx_hash,
+    sourceNetwork: confirmation.source_chain_id,
+    sourceHash: confirmation.source_tx_hash,
+    stub: USE_STUB_SUBMITTER,
+  });
 }
 
 // Wrap a submitter so every outcome is legible in the merchant's log: the on-chain tx
@@ -294,14 +287,11 @@ function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
         logSettlement(result.fulfillment_confirmation);
       } else if (result.status === "failed") {
         console.log(
-          `  payment ${result.payment_id} ${result.status} — terminal; paying for the same ` +
+          `  ⚠️  payment ${result.payment_id} ${result.status} — terminal; paying for the same ` +
             `goods again needs a NEW purchase id`,
         );
       } else {
-        console.log(
-          `  payment ${result.payment_id} accepted, still settling — the payer's re-attempt ` +
-            `at this purchase will collect the outcome`,
-        );
+        console.log(`⏳  → 402: still settling (payment ${result.payment_id})`);
       }
       return result;
     },
@@ -436,7 +426,17 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
 
 // What this merchant sells. Recorded against the payment that funded it, so the same
 // payment is never delivered against twice.
-const RESOURCE_BODY = { message: "Access granted.", data: "Your premium content here." };
+const RESOURCE_BODY = {
+  status: "fulfilled",
+  message: "Payment received. Report delivered.",
+  report: {
+    id: "rpt_acme_q3_2026",
+    title: "ACME Q3 treasury operations brief",
+    format: "application/pdf",
+    pages: 14,
+    url: "/reports/rpt_acme_q3_2026",
+  },
+};
 
 // The Atum payment a settled request was funded by, read back off the Payment-Receipt
 // header mppx sets on the 200. That id — not the request, and not the purchase
@@ -458,6 +458,7 @@ async function main() {
   // in real mode, setup()'s live gateway /v1/defaults call are the slow part of boot,
   // and until this line nothing was logged until both finished — so a slow boot and
   // a dead process looked identical to the smoke tests ("merchant output: <empty>").
+  banner("MPP merchant", USE_STUB_SUBMITTER ? "stub  ·  no funds" : "real settlement");
   console.log(
     `MPP merchant starting (${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_LABEL}`})`,
   );
@@ -528,12 +529,10 @@ async function main() {
 
       const result = await route(req, res);
       if (result.status === 402) {
-        console.log(
-          presentedPayment
-            ? `[${reqId}] → 402: not settled (purchase ${purchaseId}) — see the payment line above`
-            : `[${reqId}] → 402: challenge issued (purchase ${purchaseId})`,
-        );
-        return; // toNodeListener already wrote the response
+        if (!presentedPayment) {
+          console.log(`🎫  → 402: requesting payment (purchase ${purchaseId})`);
+        }
+        return; // toNodeListener already wrote the response; pending is logged in withSettlementLog
       }
 
       // Paid. mppx has set the Payment-Receipt header; deliver against the PAYMENT it
@@ -544,14 +543,18 @@ async function main() {
         const already = ledger.served(paymentId);
         if (already) {
           console.log(
-            `[${reqId}] → 200: payment ${paymentId} was already fulfilled — re-serving, not a new sale`,
+            `♻️  → 200: payment ${paymentId} was already fulfilled — re-serving, not a new sale`,
           );
           res.end(JSON.stringify(already.result));
           return;
         }
         ledger.record(paymentId, RESOURCE_BODY);
       }
-      console.log(`[${reqId}] → 200: settled, serving purchase ${purchaseId}`);
+      console.log(
+        USE_STUB_SUBMITTER
+          ? `✅  → 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}`
+          : `✅  → 200: settled${paymentId ? ` — payment ${paymentId}` : ""}`,
+      );
       res.end(JSON.stringify(RESOURCE_BODY));
     } catch (err) {
       console.error(`[${reqId}] merchant route error:`, (err as Error).message);
@@ -561,7 +564,10 @@ async function main() {
   });
 
   server.listen(PORT, () => {
-    console.log(`MPP merchant listening on http://localhost:${PORT}${RESOURCE_PREFIX}/<purchase id>`);
+    console.log(`📡  Merchant listening on http://localhost:${PORT}${RESOURCE_PREFIX}/<purchase id>`);
+    console.log(
+      `🛣️  ${formatAmount(FULFILLMENT_AMOUNT)} ${assetName(DEST_ASSET)}  ·  ${corridorLabel(SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK, DEST_ASSET)}`,
+    );
     console.log(`Submitter: ${USE_STUB_SUBMITTER ? "stub (local, no funds)" : `real gateway ${GATEWAY_LABEL}`}`);
     if (USE_STUB_SUBMITTER) {
       console.log(

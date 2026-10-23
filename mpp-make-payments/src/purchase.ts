@@ -77,11 +77,12 @@ export async function payPurchase(
   let paymentId: string | undefined;
 
   for (let i = 1; i <= maxAttempts; i++) {
-    console.log(`  attempt ${i}/${maxAttempts} …`);
+    if (i > 1) console.log(`  ⏳  attempt ${i}/${maxAttempts} …`);
     const response = await attempt();
 
     if (response.ok) {
-      console.log(`  settled after ${i} attempt(s) in ${elapsed()}`);
+      // Do not print "Payment settled." here: a 200 can still have no receipt.
+      // client.ts prints that line after it reads a usable confirmation.
       return response;
     }
 
@@ -102,7 +103,7 @@ export async function payPurchase(
     paymentId = problem.paymentId ?? paymentId;
     if (i === maxAttempts) break;
     console.log(
-      `  ${paymentId ? `still settling (payment ${paymentId})` : "authorization went stale before submission"}` +
+      `  ⏳  ${paymentId ? `still settling (payment ${paymentId})` : "authorization went stale before submission"}` +
         ` — ${elapsed()} elapsed, re-attempting in ${Math.round(intervalMs / 1000)}s`,
     );
     await sleep(intervalMs);
