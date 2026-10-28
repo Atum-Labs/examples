@@ -68,6 +68,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A connection can drop mid-purchase: a server or proxy closes an idle keep-alive
+// connection just as the payer reuses it, or a proxy along the way cuts an attempt held
+// open for a slow settlement. The purchase identifier makes re-attempting safe either way,
+// and a fresh connection usually succeeds, so the payer re-attempts at once. A merchant that
+// stays unreachable (a wrong MERCHANT_URL, a server that is down) fails after this many
+// network errors in a row rather than consuming the whole re-attempt budget.
+const MAX_CONSECUTIVE_NETWORK_ERRORS = 3;
+
+/**
+ * Node's fetch rejects every network failure with `TypeError("fetch failed")` and keeps the
+ * socket error on `cause`. Its other TypeErrors, such as a URL it cannot parse, are
+ * configuration errors that re-attempting cannot fix.
+ */
+function isNetworkError(err: unknown): err is TypeError {
+  return err instanceof TypeError && err.message === "fetch failed";
+}
+
+/** The cause as `message (code)`, without repeating a code the message already names. */
+function describeCause(cause: unknown): string {
+  const { code, message } = (cause ?? {}) as { code?: unknown; message?: unknown };
+  const text = typeof message === "string" ? message : "";
+  if (typeof code !== "string" || text.includes(code)) return text || String(cause);
+  return text ? `${text} (${code})` : code;
+}
+
+/**
+ * An error's message with its cause appended. fetch reports every network failure as a
+ * bare "fetch failed"; the cause says which one (`read ECONNRESET`, `connect ECONNREFUSED …`).
+ */
+export function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  return err.cause === undefined ? err.message : `${err.message}: ${describeCause(err.cause)}`;
+}
+
 /** Decode the settlement report, or `undefined` when the attempt presented no payment. */
 function settleResponseOf(response: Response): SettleResponse | undefined {
   const header = response.headers.get("payment-response");
@@ -80,7 +114,8 @@ function settleResponseOf(response: Response): SettleResponse | undefined {
  *
  * @param attempt - makes one attempt at the purchase, under a fixed purchase identifier
  * @returns the response that settled, or the response that presented no payment at all
- * @throws if the payment failed terminally, was refused, or never settled in time
+ * @throws if the payment failed terminally, was refused, or never settled in time, or the
+ *   network failed MAX_CONSECUTIVE_NETWORK_ERRORS times in a row
  */
 export async function payPurchase(
   attempt: () => Promise<Response>,
@@ -91,10 +126,21 @@ export async function payPurchase(
   const startedAt = Date.now();
   const elapsed = () => `${Math.round((Date.now() - startedAt) / 1000)}s`;
   let paymentId: string | undefined;
+  let networkErrors = 0;
 
   for (let i = 1; i <= maxAttempts; i++) {
     if (i > 1) console.log(`  ⏳  attempt ${i}/${maxAttempts} …`);
-    const response = await attempt();
+    let response: Response;
+    try {
+      response = await attempt();
+    } catch (err) {
+      if (!isNetworkError(err) || ++networkErrors >= MAX_CONSECUTIVE_NETWORK_ERRORS || i === maxAttempts) {
+        throw err;
+      }
+      console.log(`  ⏳  network error: ${describeCause(err.cause)} — re-attempting now`);
+      continue;
+    }
+    networkErrors = 0;
     const settle = settleResponseOf(response);
 
     // No PAYMENT-RESPONSE means no payment was presented — the client declined to build

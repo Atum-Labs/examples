@@ -39,6 +39,8 @@ Cross-chain settlement can take longer than the gateway holds a connection open 
 Status: 200
 ```
 
+A dropped connection is re-attempted the same way, without waiting: a server or proxy can close an idle keep-alive connection just as the payer reuses it, and a fresh connection usually succeeds. After three network errors in a row the payer stops and prints the cause, for example `did not complete: fetch failed: ECONNREFUSED` when nothing is listening at `MERCHANT_URL`.
+
 Only the first attempt is slow — it creates the payment; re-attempts return immediately, so the interval paces the wait. Each attempt fetches a fresh `402` and signs a **new** credential: `quote_deadline` is an absolute timestamp, so a signed credential goes stale within seconds and `verify()` refuses it. What makes the attempts one payment is the **purchase identifier**. MPP gives the payer no channel to carry it, so the merchant needs it *before* it can build the challenge — this client therefore puts it in the URL, and the merchant stamps it into the challenge from there:
 
 ```

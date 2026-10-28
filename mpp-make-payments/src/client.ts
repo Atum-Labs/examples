@@ -14,7 +14,7 @@ import {
   atumGatewayTrust,
   type AtumEscrowChallenge,
 } from "@atumlabs/mppx-atum-escrow/client";
-import { payPurchase } from "./purchase.js";
+import { describeError, payPurchase } from "./purchase.js";
 import { banner, line, logArrival, settledAfter } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
@@ -229,6 +229,6 @@ try {
   console.log(JSON.stringify(body, null, 2));
   if (!response.ok) process.exit(1);
 } catch (err) {
-  console.error(`Purchase ${purchaseId} did not complete: ${(err as Error).message}`);
+  console.error(`Purchase ${purchaseId} did not complete: ${describeError(err)}`);
   process.exit(1);
 }

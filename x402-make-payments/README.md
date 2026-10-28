@@ -26,6 +26,8 @@ Cross-chain settlement can take longer than the gateway holds a connection open 
 Status: 200
 ```
 
+A dropped connection is re-attempted the same way, without waiting: a server or proxy can close an idle keep-alive connection just as the payer reuses it, and a fresh connection usually succeeds. After three network errors in a row the payer stops and prints the cause, for example `did not complete: fetch failed: ECONNREFUSED` when nothing is listening at `MERCHANT_URL`.
+
 Only the first attempt is slow — it creates the payment; re-attempts return immediately, so the interval paces the wait. Each attempt re-signs from a fresh `402`, since `quote_deadline` is an absolute timestamp and a signed payment goes stale within seconds. What makes them one payment is the **purchase identifier**, carried in x402's [`payment-identifier`](https://github.com/coinbase/x402/blob/main/specs/extensions/payment_identifier.md) extension:
 
 ```ts
