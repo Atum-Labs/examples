@@ -14,7 +14,7 @@ The merchant gates a route (`GET /paid/<purchase id>`) behind payment. Unlike x4
 4. `mppx` calls this method's `verify()` — it checks the signature and terms locally, then hands the request to your `PaymentSubmitter`.
 5. The merchant returns `200 OK` with the protected resource and a `Payment-Receipt` header — or, if settlement is still in flight, a `402` telling the payer to re-attempt the same purchase.
 
-By default this example uses a **stub submitter** that returns a canned confirmation, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
+By default this example uses a **stub submitter** that returns a canned completed payment, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
 
 ## Who does the payer trust?
 
