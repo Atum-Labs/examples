@@ -205,7 +205,7 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 
 6. Leave `GATEWAY_URL` unset to use the hosted testnet gateway (`https://payment-gw.production-testnet.atum.xyz`).
 
-On success the client prints the `payment_id` and fulfillment confirmation (source and destination transaction hashes). Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
+On success the client prints the `payment_id` and the payment's `transactions` (the source deposit and the destination payout). Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
 
 For **mainnet** (where authorized by Atum), the steps are identical with Atum-authorized mainnet chains/tokens and the production gateway URL Atum provides.
 

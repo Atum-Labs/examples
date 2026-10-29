@@ -115,7 +115,7 @@ buildChargeChallenge(corridor, source, FULFILLMENT_AMOUNT, { intentId: purchaseI
 
 A request that names no purchase is refused with a `400` rather than served a challenge the payer would reject anyway.
 
-**Delivering once: your job.** A purchase identifier stops you being *paid* twice, not *delivering* twice: if a payer reuses one across two purchases, the second resolves onto the first payment and the gateway replays its receipt, so a merchant keying delivery on the request ships again. Key it on the receipt's `payment_id` instead — [`src/payments.ts`](src/payments.ts) shows the shape, and in production it is the payments table you already keep for reconciliation. It also makes an honest retry safe: a payer that never received the `200` is served the same result.
+**Delivering once: your job.** A purchase identifier stops you being *paid* twice, not *delivering* twice: if a payer reuses one across two purchases, the second resolves onto the first payment and the gateway replays its receipt, so a merchant keying delivery on the request ships again. Key it on the receipt's `paymentId` instead — [`src/payments.ts`](src/payments.ts) shows the shape, and in production it is the payments table you already keep for reconciliation. It also makes an honest retry safe: a payer that never received the `200` is served the same result.
 
 ## Going to testnet / mainnet
 

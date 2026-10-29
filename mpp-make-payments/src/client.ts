@@ -151,12 +151,12 @@ function logUnavailable(reason: string): void {
   console.log(`   Destination  settlement details unavailable (${reason})`);
 }
 
-function confirmationFromReceipt(header: string | null): {
-  stub?: boolean;
-  destination_chain_id?: string;
-  destination_tx_hash?: string;
-  source_chain_id?: string;
-  source_tx_hash?: string;
+// The payout the receipt names: `reference` is its transaction and `destinationChainId` the
+// chain it is on. The source deposit is not on the receipt; the merchant logs it.
+function payoutFromReceipt(header: string | null): {
+  stub: boolean;
+  chainId?: string;
+  hash?: string;
 } | undefined {
   if (!header) {
     logUnavailable("no receipt");
@@ -164,20 +164,21 @@ function confirmationFromReceipt(header: string | null): {
   }
   try {
     const receipt = Receipt.deserialize(header) as {
-      fulfillmentConfirmation?: {
-        stub?: boolean;
-        destination_chain_id?: string;
-        destination_tx_hash?: string;
-        source_chain_id?: string;
-        source_tx_hash?: string;
-      };
+      reference?: string;
+      paymentId?: string;
+      destinationChainId?: string;
     };
-    const c = receipt.fulfillmentConfirmation;
-    if (!c || (!c.destination_chain_id && !c.destination_tx_hash)) {
-      logUnavailable("no fulfillment confirmation");
+    if (!receipt.destinationChainId && !receipt.reference) {
+      logUnavailable("no payout on the receipt");
       return undefined;
     }
-    return c;
+    return {
+      // The example merchant's stub names its payments pay_stub_…; a gateway payment id never
+      // starts that way, and the stub's hashes are placeholders not worth linking to.
+      stub: receipt.paymentId?.startsWith("pay_stub_") ?? false,
+      chainId: receipt.destinationChainId,
+      hash: receipt.reference,
+    };
   } catch {
     logUnavailable("unreadable receipt");
     return undefined;
@@ -210,16 +211,10 @@ try {
   const body = await response.json().catch(() => response.text());
 
   if (response.ok) {
-    const confirm = confirmationFromReceipt(receipt);
-    if (confirm) {
+    const payout = payoutFromReceipt(receipt);
+    if (payout) {
       console.log(settledAfter(1));
-      logArrival({
-        destNetwork: confirm.destination_chain_id,
-        destHash: confirm.destination_tx_hash,
-        sourceNetwork: confirm.source_chain_id,
-        sourceHash: confirm.source_tx_hash,
-        stub: Boolean(confirm.stub),
-      });
+      logArrival({ destNetwork: payout.chainId, destHash: payout.hash, stub: payout.stub });
     }
   } else {
     logUnavailable(`HTTP ${response.status}`);

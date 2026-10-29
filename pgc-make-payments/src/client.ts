@@ -241,17 +241,15 @@ async function main(): Promise<void> {
       );
     }
 
-    const confirmation =
-      "fulfillment_confirmation" in outcome.snapshot
-        ? outcome.snapshot.fulfillment_confirmation
-        : undefined;
+    // A completed payment lists the payer's deposit and the payout under `transactions`.
+    const { deposit, fulfillment } = outcome.snapshot.transactions ?? {};
     console.log(settledAfter(1, `— payment ${submitted.payment_id}`));
     logArrival({
-      destNetwork: confirmation?.destination_chain_id ?? DEST_NETWORK,
+      destNetwork: fulfillment?.chain_id ?? DEST_NETWORK,
       destAsset: DEST_ASSET,
-      destHash: confirmation?.destination_tx_hash,
-      sourceNetwork: confirmation?.source_chain_id,
-      sourceHash: confirmation?.source_tx_hash,
+      destHash: fulfillment?.transaction_hash,
+      sourceNetwork: deposit?.chain_id,
+      sourceHash: deposit?.transaction_hash,
       stub: USE_STUB_GATEWAY,
     });
     console.log(`Status: ${outcome.status}`);

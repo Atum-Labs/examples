@@ -16,7 +16,7 @@ import {
   type AtumEscrowCorridor,
   type AtumEscrowReceipt,
   type PaymentSubmitter,
-  type FulfillmentConfirmation,
+  type PaymentSubmitResult,
   type PaymentRequest,
 } from "@atumlabs/mppx-atum-escrow/server";
 import type { PaymentGatewayClient } from "@atumlabs/payment-gateway-client";
@@ -230,8 +230,9 @@ function stubChainDefaults(
 // This is a demo knob for the stub only. Nothing on the real path reads it.
 const STUB_PENDING_ATTEMPTS = Number(process.env.STUB_PENDING_ATTEMPTS ?? "0");
 
-// Local stub: returns a canned confirmation so the full 402 → pay → 200 flow runs
-// without a gateway or on-chain funds. It settles nothing.
+// Local stub: answers as the gateway does for a completed payment, with placeholder
+// transactions, so the full 402 → pay → 200 flow runs without a gateway or on-chain funds.
+// It settles nothing.
 function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
   const attemptsByPayment = new Map<string, number>();
   return {
@@ -245,33 +246,31 @@ function stubSubmitter(corridor: AtumEscrowCorridor): PaymentSubmitter {
       attemptsByPayment.set(requestId, attempt);
 
       if (attempt <= STUB_PENDING_ATTEMPTS) {
-        return { payment_id: paymentId, status: "pending" };
+        return { payment_id: paymentId, status: "pending", transactions: undefined };
       }
 
-      const confirmation: FulfillmentConfirmation & { stub: true } = {
+      return {
         payment_id: paymentId,
-        request_id: requestId,
-        fulfillment_timestamp: new Date().toISOString(),
-        source_chain_id: corridor.sources[0].network,
-        destination_chain_id: corridor.destination.network,
-        source_tx_hash: `0x${"11".repeat(32)}`,
-        destination_tx_hash: `0x${"22".repeat(32)}`,
-        stub: true,
+        status: "completed",
+        transactions: {
+          deposit: { transaction_hash: `0x${"11".repeat(32)}`, chain_id: corridor.sources[0].network },
+          fulfillment: { transaction_hash: `0x${"22".repeat(32)}`, chain_id: corridor.destination.network },
+        },
       };
-      return { payment_id: paymentId, status: "completed", fulfillment_confirmation: confirmation };
     },
   };
 }
 
 // Where the money moved: destination arrival (same line stub or real), plus tx links when real.
-function logSettlement(confirmation: FulfillmentConfirmation | undefined): void {
-  if (!confirmation) return;
+function logSettlement(transactions: PaymentSubmitResult["transactions"]): void {
+  const payout = transactions?.fulfillment;
+  if (!payout) return;
   logArrival({
-    destNetwork: confirmation.destination_chain_id ?? DEST_NETWORK,
+    destNetwork: payout.chain_id,
     destAsset: DEST_ASSET,
-    destHash: confirmation.destination_tx_hash,
-    sourceNetwork: confirmation.source_chain_id,
-    sourceHash: confirmation.source_tx_hash,
+    destHash: payout.transaction_hash,
+    sourceNetwork: transactions.deposit?.chain_id,
+    sourceHash: transactions.deposit?.transaction_hash,
     stub: USE_STUB_SUBMITTER,
   });
 }
@@ -283,8 +282,12 @@ function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
   return {
     async submit(request) {
       const result = await submitter.submit(request);
-      if (result.fulfillment_confirmation) {
-        logSettlement(result.fulfillment_confirmation);
+      // The same rule verify() applies before it issues a receipt: the gateway says the payout
+      // is made (finalizing or completed) and lists it under transactions.fulfillment.
+      const paidOut =
+        (result.status === "finalizing" || result.status === "completed") && result.transactions?.fulfillment;
+      if (paidOut) {
+        logSettlement(result.transactions);
       } else if (result.status === "failed") {
         console.log(
           `  ⚠️  payment ${result.payment_id} ${result.status} — terminal; paying for the same ` +
@@ -398,23 +401,20 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   assertChargeable(corridor);
   // Submit and return what the gateway said — do NOT poll for completion here.
   //
-  // The gateway holds the connection for up to ~30s waiting for settlement. If it finishes
-  // in that window we get the FulfillmentConfirmation; if not, we get a payment id and a
-  // `pending` status, and that is the honest answer to give back.
+  // The gateway holds the connection for up to ~30s waiting for settlement. If the payout
+  // lands in that window we get it in `transactions.fulfillment`; if not, we get a payment id
+  // and a `pending` status, and that is the honest answer to give back.
   //
   // Polling here instead would hold the payer's own HTTP request open for the whole
   // settlement window — the classic proxy and load-balancer timeout — and would hide the
   // pending state that makes the payer's re-attempt safe. Passing `status` through is what
   // lets verify() tell a payment still settling from one that failed; those two need
-  // opposite responses from the payer.
+  // opposite responses from the payer. `transactions` is where verify() reads the payout
+  // from, so pass it through unchanged.
   const submitter: PaymentSubmitter = {
     async submit(request) {
       const res = await gateway.payments.submitPayment({ requestBody: request as never });
-      return {
-        payment_id: res.payment_id,
-        status: res.status,
-        fulfillment_confirmation: res.fulfillment_confirmation as FulfillmentConfirmation | undefined,
-      };
+      return { payment_id: res.payment_id, status: res.status, transactions: res.transactions };
     },
   };
   return { corridor, submitter: withSettlementLog(submitter) };
@@ -447,7 +447,7 @@ function paymentIdOf(res: http.ServerResponse): string | undefined {
   if (typeof header !== "string") return undefined;
   try {
     const receipt = Receipt.deserialize(header) as AtumEscrowReceipt;
-    return receipt.fulfillmentConfirmation?.payment_id;
+    return receipt.paymentId;
   } catch {
     return undefined;
   }
