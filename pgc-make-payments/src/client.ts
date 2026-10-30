@@ -5,6 +5,7 @@
 
 import "dotenv/config";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { ethers } from "ethers";
 import {
   PaymentGatewayClient,
@@ -19,11 +20,20 @@ import {
   defaultGateway,
   type PaymentTransactions,
 } from "@atumlabs/payment-gateway-client";
+import {
+  SessionTokenError,
+  createSessionTokenSource,
+  signerFromEthersWallet,
+} from "@atumlabs/payment-gateway-client/signing";
 import { collectPayment } from "./purchase.js";
 import { STUB_OUTCOMES, startStubGateway } from "./stub-gateway.js";
+import { startStubAuth, stubCredential, type StubAuth } from "./stub-auth.js";
 import { assetName, banner, corridorLabel, detail, formatAmount, line, logArrival, settledAfter } from "./display.js";
 
 const USE_STUB_GATEWAY = (process.env.USE_STUB_GATEWAY ?? "true") !== "false";
+
+// Opt-in: request a Platform Authentication session token and send it on every gateway call.
+const USE_SESSION_TOKEN = process.env.USE_SESSION_TOKEN === "true";
 
 const {
   PRIVATE_KEY,
@@ -36,6 +46,8 @@ const {
   DEST_NETWORK = "eip155:42431",
   DEST_ASSET = "0x20c0000000000000000000000000000000000000",
   FULFILLMENT_AMOUNT = "50000",
+  AUTH_URL = "https://auth.production-testnet.atum.xyz",
+  CREDENTIAL_FILE,
 } = process.env;
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -53,6 +65,16 @@ const CORRIDOR_LABEL = corridorLabel(SOURCE_NETWORK, SOURCE_ASSET, DEST_NETWORK,
 if (!PRIVATE_KEY && (RPC_URL || !USE_STUB_GATEWAY)) {
   console.error(
     "Error: PRIVATE_KEY is required in .env for real settlement (RPC_URL is set or USE_STUB_GATEWAY=false).",
+  );
+  process.exit(1);
+}
+
+// A real session needs the Known to Atum credential issued to the payer's wallet. It comes from
+// Atum's onboarding, so unlike a stub key it cannot be generated here.
+if (USE_SESSION_TOKEN && !USE_STUB_GATEWAY && !CREDENTIAL_FILE) {
+  console.error(
+    "Error: CREDENTIAL_FILE is required when USE_SESSION_TOKEN=true and USE_STUB_GATEWAY=false: " +
+      "the Known to Atum credential issued to the wallet in PRIVATE_KEY.",
   );
   process.exit(1);
 }
@@ -159,6 +181,31 @@ async function maybeApproveSource(): Promise<void> {
   );
 }
 
+/**
+ * Keeps a session token current for the gateway client. The presentation that earns it is signed
+ * by the wallet the credential is issued to: here, the payer.
+ *
+ * A failed renewal never fails a payment. The source keeps sending the token it holds while it
+ * is valid, and once none is valid the calls go without one, as an anonymous caller.
+ */
+function sessionTokens(stubAuth: StubAuth | undefined) {
+  const credentials = stubAuth
+    ? [stubCredential(depositor)]
+    : [JSON.parse(readFileSync(CREDENTIAL_FILE as string, "utf8")) as unknown];
+  return createSessionTokenSource({
+    authUrl: stubAuth?.url ?? AUTH_URL,
+    credentials,
+    signer: signerFromEthersWallet(wallet),
+    onError: (error) => {
+      const why =
+        error instanceof SessionTokenError
+          ? `${error.status}${error.code ? ` ${error.code}` : ""}`
+          : (error as Error).message;
+      line("⚠️", `No session token (${why}): gateway calls go without one until a renewal succeeds.`);
+    },
+  });
+}
+
 async function main(): Promise<void> {
   const stub = USE_STUB_GATEWAY
     ? await startStubGateway({
@@ -169,10 +216,27 @@ async function main(): Promise<void> {
     : undefined;
   // Comes from the published client so a host change is not a second literal here.
   const gatewayUrl = stub?.url ?? (GATEWAY_URL || defaultGateway);
-  const client = new PaymentGatewayClient({ BASE: gatewayUrl });
+  // A stub run pairs the stub gateway with a stub authorization service and credential.
+  const stubAuth =
+    USE_SESSION_TOKEN && USE_STUB_GATEWAY
+      ? await startStubAuth({ refuse: process.env.STUB_AUTH_REFUSE === "true" })
+      : undefined;
+  const session = USE_SESSION_TOKEN ? sessionTokens(stubAuth) : undefined;
+  // TOKEN is asked for on every call, so prepare, submit and each status check send the current
+  // token. An empty answer sends no Authorization header.
+  const client = new PaymentGatewayClient({
+    BASE: gatewayUrl,
+    ...(session ? { TOKEN: () => session.token() } : {}),
+  });
 
   try {
     await maybeApproveSource();
+
+    if (session) {
+      // Requested up front so the first gateway call already carries it.
+      const token = await session.token();
+      if (token) line("🎫", `Session token for ${depositor}, sent on every gateway call`);
+    }
 
     line("🎯", `Request ${requestId}`);
     line("🛣️", `${formatAmount(FULFILLMENT_AMOUNT)} ${assetName(DEST_ASSET)}  ·  ${CORRIDOR_LABEL}`);
@@ -268,6 +332,11 @@ async function main(): Promise<void> {
 
     showPayout(outcome.snapshot);
     console.log(`Status: ${outcome.status}`);
+    if (stub && session) {
+      const calls = stub.calls();
+      const carried = calls.filter((c) => c.authorization?.startsWith("Bearer ")).length;
+      detail(`${carried} of ${calls.length} gateway calls carried the session token`);
+    }
     if (outcome.status === "finalizing") {
       // Paid on chain, but the wait ended before its chain made the payout final. It normally
       // becomes completed; exit 5 says so, as send-payment does, without reporting a failure.
@@ -278,6 +347,7 @@ async function main(): Promise<void> {
       process.exitCode = 5;
     }
   } finally {
+    await stubAuth?.close();
     try {
       await stub?.close();
     } catch (closeErr) {

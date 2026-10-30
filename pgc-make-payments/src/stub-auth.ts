@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-// An in-process stand-in for the Atum authorization service and the one gateway call this example
-// makes, so a first run needs no credential, no network and no keys.
+// An in-process stand-in for the Atum authorization service, for a stub run with
+// USE_SESSION_TOKEN=true: it needs no credential, no network and no keys.
 //
 // It checks the shape of what the client sends: the presentation must answer a nonce it issued,
 // once, for its own environment, from the holder its credentials name, and carry a Known to Atum
@@ -20,15 +20,18 @@ const PRESENTATION_TOKEN_TYPE = "urn:atum:params:oauth:token-type:ldp_vp";
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 export const STUB_TOKEN_LIFETIME_SECONDS = 3600;
 
+export interface StubAuthOptions {
+  /** Refuse every token exchange as unavailable, to show a payment going ahead without a session. */
+  refuse?: boolean;
+}
+
 export interface StubAuth {
-  /** Base URL serving both the authorization service and the gateway call. */
+  /** Base URL of the authorization service. */
   url: string;
   /** Nonces issued so far, one per session requested. */
   noncesIssued: number;
   /** Tokens issued so far. */
   tokensIssued: string[];
-  /** The Authorization header of each gateway call, in order. */
-  gatewayAuthorization: Array<string | undefined>;
   close(): Promise<void>;
 }
 
@@ -55,7 +58,7 @@ export function stubCredential(address: string): Record<string, unknown> {
   };
 }
 
-export async function startStubAuth(): Promise<StubAuth> {
+export async function startStubAuth(options: StubAuthOptions = {}): Promise<StubAuth> {
   const outstanding = new Set<string>();
   let expectedDomain = "";
 
@@ -63,7 +66,6 @@ export async function startStubAuth(): Promise<StubAuth> {
     url: "",
     noncesIssued: 0,
     tokensIssued: [],
-    gatewayAuthorization: [],
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 
@@ -110,6 +112,9 @@ export async function startStubAuth(): Promise<StubAuth> {
         if (!credentials.some((c) => c.type?.includes("KnownToAtumVerifiableCredential"))) {
           return refuse(res, 403, "CREDENTIAL_MISSING", "No Known to Atum credential was presented.");
         }
+        if (options.refuse) {
+          return refuse(res, 503, "SERVICE_UNAVAILABLE", "The stub was started to refuse every session.");
+        }
         const accessToken = `stub.${randomBytes(24).toString("base64url")}`;
         stub.tokensIssued.push(accessToken);
         send(
@@ -123,21 +128,6 @@ export async function startStubAuth(): Promise<StubAuth> {
           },
           { "Cache-Control": "no-store", Pragma: "no-cache" },
         );
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname === "/v1/defaults") {
-        stub.gatewayAuthorization.push(req.headers.authorization);
-        send(res, 200, {
-          chain_id: url.searchParams.get("chain_id") ?? "eip155:84532",
-          quote_selector: "0x0000000000000000000000000000000000000004",
-          escrow_contract: "0x0000000000000000000000000000000000000001",
-          fulfillment_proxy: "0x0000000000000000000000000000000000000003",
-          fulfillment_verifier: {
-            account: "0x0000000000000000000000000000000000000005",
-            endpoint: "http://127.0.0.1/veri-fill",
-          },
-        });
         return;
       }
 

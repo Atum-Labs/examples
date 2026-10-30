@@ -9,7 +9,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { ethers } from "ethers";
 import { startStubGateway } from "./stub-gateway.js";
+import { startStubAuth, stubCredential } from "./stub-auth.js";
 
 // Runs the real pgc-make-payments client as a separate process, exactly as a
 // developer would, against its in-process stub gateway. This catches the
@@ -43,10 +47,13 @@ interface RunResult {
 // either one would silently change what these cases test. Strip both from the inherited
 // environment and set only the ones a case names — "unset" has to mean absent, not "".
 const AMOUNT_VARS = ["FULFILLMENT_AMOUNT", "MAX_SOURCE_AMOUNT"] as const;
+// Likewise the session settings: a shell that exports USE_SESSION_TOKEN would turn every case
+// into a session run.
+const SESSION_VARS = ["USE_SESSION_TOKEN", "AUTH_URL", "CREDENTIAL_FILE", "STUB_AUTH_REFUSE"] as const;
 
 function runClient(env: Record<string, string>): Promise<RunResult> {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, DOTENV_CONFIG_PATH: NO_DOTENV };
-  for (const name of AMOUNT_VARS) delete childEnv[name];
+  for (const name of [...AMOUNT_VARS, ...SESSION_VARS]) delete childEnv[name];
   Object.assign(childEnv, env);
   return new Promise((resolve, reject) => {
     const client = spawn(tsxBin(CLIENT_DIR), ["src/client.ts"], {
@@ -386,4 +393,97 @@ test("an explicit MAX_SOURCE_AMOUNT is submitted to the gateway verbatim as the 
   } finally {
     await stub.close();
   }
+});
+
+// --- Session tokens (USE_SESSION_TOKEN=true) --------------------------------------
+// These run the client against a stub gateway and a stub authorization service started here,
+// so the test reads what each gateway call carried rather than what the client printed.
+
+// The settings a run against our own stubs needs, with a credential issued to its payer.
+function sessionRun(gatewayUrl: string, authUrl: string): Record<string, string> {
+  const privateKey = randomPrivateKey();
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "pgc-session-")), "credential.json");
+  writeFileSync(file, JSON.stringify(stubCredential(new ethers.Wallet(privateKey).address)));
+  return {
+    USE_STUB_GATEWAY: "false", // so the client points at OUR stubs instead of spinning its own
+    GATEWAY_URL: gatewayUrl,
+    RPC_URL: "",
+    DEST_ADDRESS: "0x0000000000000000000000000000000000000001",
+    PRIVATE_KEY: privateKey,
+    USE_SESSION_TOKEN: "true",
+    AUTH_URL: authUrl,
+    CREDENTIAL_FILE: file,
+  };
+}
+
+test("a session run sends the token on prepare, submit and every status check", async () => {
+  const gateway = await startStubGateway({ pendingAttempts: 1 });
+  const auth = await startStubAuth();
+  try {
+    const result = await runClient(sessionRun(gateway.url, auth.url));
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+
+    const calls = gateway.calls();
+    assert.ok(calls.some((c) => c.call === "POST /v1/payments"), "expected a submit");
+    assert.ok(calls.some((c) => /^GET \/v1\/payments\/.+\/status$/.test(c.call)), "expected a status check");
+    assert.equal(auth.tokensIssued.length, 1, "one session covers the whole payment");
+    for (const call of calls) {
+      assert.equal(call.authorization, `Bearer ${auth.tokensIssued[0]}`, `${call.call} went without the token`);
+    }
+  } finally {
+    await auth.close();
+    await gateway.close();
+  }
+});
+
+test("a refused session does not stop the payment: the calls go without a token", async () => {
+  const gateway = await startStubGateway();
+  const auth = await startStubAuth({ refuse: true });
+  try {
+    const result = await runClient(sessionRun(gateway.url, auth.url));
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.match(result.output, /No session token \(503 SERVICE_UNAVAILABLE\)/);
+    assert.ok(gateway.submitted().length > 0, "expected the payment to be submitted");
+    assert.deepEqual(
+      gateway.calls().filter((c) => c.authorization !== undefined),
+      [],
+      "no call should carry a token",
+    );
+  } finally {
+    await auth.close();
+    await gateway.close();
+  }
+});
+
+test("without USE_SESSION_TOKEN no gateway call carries a token", async () => {
+  const gateway = await startStubGateway();
+  try {
+    const { USE_SESSION_TOKEN: _on, AUTH_URL: _auth, CREDENTIAL_FILE: _file, ...plain } = sessionRun(gateway.url, "");
+    const result = await runClient(plain);
+    assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+    assert.ok(gateway.calls().length > 0);
+    assert.deepEqual(gateway.calls().filter((c) => c.authorization !== undefined), []);
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a session run against a real gateway needs CREDENTIAL_FILE", async () => {
+  const result = await runClient({
+    USE_STUB_GATEWAY: "false",
+    GATEWAY_URL: "http://127.0.0.1:9",
+    RPC_URL: "",
+    DEST_ADDRESS: "0x0000000000000000000000000000000000000001",
+    PRIVATE_KEY: randomPrivateKey(),
+    USE_SESSION_TOKEN: "true",
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /CREDENTIAL_FILE is required when USE_SESSION_TOKEN=true/);
+});
+
+test("a stub session run says every gateway call carried the token", async () => {
+  const result = await runClient({ ...STUB_ENV, USE_SESSION_TOKEN: "true", STUB_PENDING_ATTEMPTS: "1" });
+  assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+  assert.match(result.output, /Session token for 0x[0-9a-fA-F]{40}, sent on every gateway call/);
+  assert.match(result.output, /(\d+) of \1 gateway calls carried the session token/);
 });

@@ -49,7 +49,15 @@ export interface StubGateway {
   submitted: () => string[];
   /** The body of each POST /v1/payments, in order: what a real gateway would have been asked to settle. */
   submittedRequests: () => Record<string, unknown>[];
+  /** Every call, in order, with the Authorization header it carried, if any. */
+  calls: () => StubCall[];
   close: () => Promise<void>;
+}
+
+export interface StubCall {
+  /** Method and path, e.g. `POST /v1/payments`. */
+  call: string;
+  authorization: string | undefined;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -120,12 +128,14 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
   });
   const submitted: string[] = [];
   const submittedRequests: Record<string, unknown>[] = [];
+  const calls: StubCall[] = [];
   const payments = new Map<string, { requestId: string; statusChecks: number }>();
 
   const server: Server = createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const method = req.method ?? "GET";
+      calls.push({ call: `${method} ${url.pathname}`, authorization: req.headers.authorization });
 
       if (method === "GET" && url.pathname === "/v1/defaults") {
         const chainId = url.searchParams.get("chain_id") ?? "eip155:84532";
@@ -205,6 +215,7 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
         url: `http://127.0.0.1:${port}`,
         submitted: () => submitted.slice(),
         submittedRequests: () => submittedRequests.map((request) => ({ ...request })),
+        calls: () => calls.map((call) => ({ ...call })),
         close: () =>
           new Promise<void>((closeResolve, closeReject) => {
             server.closeAllConnections();
