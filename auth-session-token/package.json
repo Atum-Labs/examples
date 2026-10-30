@@ -1,0 +1,26 @@
+{
+  "name": "auth-session-token",
+  "version": "0.1.0",
+  "description": "Example that requests an Atum session token and sends it on Payment Gateway calls, using @atumlabs/payment-gateway-client",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "token": "tsx src/client.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@atumlabs/payment-gateway-client": "5.0.0",
+    "dotenv": "^16.0.0",
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "undici": "^6.28.0"
+  }
+}

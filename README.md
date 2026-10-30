@@ -32,6 +32,7 @@ Set the stub flag to `false` to settle for real. All three examples ship pointed
 | --- | --- |
 | Payment Gateway (MPP + PGC settlement, x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://payment-gw.production-testnet.atum.xyz/x402/v1` |
+| Authorization service (session tokens) | `https://auth.production-testnet.atum.xyz` |
 
 Same host for x402/MPP, two values: the gateway hosts the x402 facilitator under a `/x402/v1` prefix, and that prefix is part of `FACILITATOR_URL`.
 
@@ -63,7 +64,7 @@ CI runs `scripts/check-host-literals.sh` and fails if a reachable `atum.network`
 
 ### Run it
 
-1. Install all five apps:
+1. Install all six apps:
 
 ```bash
 npm run install:all
@@ -84,7 +85,7 @@ cd x402-make-payments
 GATEWAY_URL=http://localhost:4020 npm run pay
 ```
 
-You should see a generated payer address, then `Status: 200` and `Report delivered`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`, with `GATEWAY_URL=http://localhost:4030` on the payer. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub.
+You should see a generated payer address, then `Status: 200` and `Report delivered`. MPP is the same pair on port **4030**: `mpp-accept-payments` + `mpp-make-payments`, with `GATEWAY_URL=http://localhost:4030` on the payer. PGC is a single app with no merchant — `cd pgc-make-payments && npm run pay` runs prepare → sign → submit against an in-process stub. `auth-session-token` gets a session token and sends it on a Payment Gateway call — `cd auth-session-token && npm run token` runs the exchange against an in-process stub; a real session needs the Known to Atum credential issued to your wallet.
 
 Set `PRIVATE_KEY` in `.env` (copied from `.env.example`) when you move to real settlement — see [Environments](#environments).
 
@@ -94,12 +95,12 @@ Each example is a standalone project with its own tests, but the repo root has a
 
 | Command | What it runs | Funds |
 | --- | --- | --- |
-| `npm run install:all` | `npm install` in all five apps | — |
-| `npm test` | Smoke tests for all five apps (alias for `test:smoke`) | None |
+| `npm run install:all` | `npm install` in all six apps | — |
+| `npm test` | Smoke tests for all six apps (alias for `test:smoke`) | None |
 | `npm run test:smoke:pending` | The same suites, with the stubs reporting settlement as still in flight — exercises the payer's re-attempt / wait path | None |
 | `npm run test:e2e` | Real, funded settlement for x402, MPP, and PGC against production-testnet | Real testnet funds (both chains) |
 | `npm run test:all` | Smoke, then the funded e2e | Real testnet funds |
-| `npm run typecheck` | `tsc --noEmit` across all five apps | — |
+| `npm run typecheck` | `tsc --noEmit` across all six apps | — |
 
 ### Step 1 - Install
 
