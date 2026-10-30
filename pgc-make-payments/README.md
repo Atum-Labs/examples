@@ -193,7 +193,7 @@ npx approve-permit2 "$SENDER" "$SOURCE" --rpc-url https://sepolia.base.org
 npm test
 ```
 
-Hermetic: the full prepare → sign → submit → collect flow runs against the in-process stub — no gateway, no funds, no key required.
+Hermetic: the full prepare → sign → submit → collect flow runs against the in-process stub — no gateway, no funds, no key required. The session-token cases run against an in-process authorization service as well, and check what each gateway call carried.
 
 ## Going to testnet / mainnet
 
@@ -215,6 +215,26 @@ On success the client prints the `payment_id` and the payment's `transactions` (
 
 For **mainnet** (where authorized by Atum), the steps are identical with Atum-authorized mainnet chains/tokens and the production gateway URL Atum provides.
 
+## Session token (optional)
+
+A session token identifies your wallet to the Payment Gateway. The gateway does not require one, so this mode is off by default. With `USE_SESSION_TOKEN=true`, every gateway call (prepare, submit and each status check) carries `Authorization: Bearer <token>`. [Session tokens](https://docs.atum.xyz/get-started/identity/session-tokens) explains what a session changes.
+
+The token comes from Atum's authorization service. The client signs a presentation of your Known to Atum credential that answers a single-use nonce, and exchanges it for a short-lived token. `createSessionTokenSource` from `@atumlabs/payment-gateway-client/signing` keeps the token current, and the client asks it for the token on every call:
+
+```ts
+const session = createSessionTokenSource({ authUrl, credentials, signer: signerFromEthersWallet(wallet), onError });
+const client = new PaymentGatewayClient({ BASE: gatewayUrl, TOKEN: () => session.token() });
+```
+
+**A stub run** needs nothing more: `USE_SESSION_TOKEN=true npm run pay` uses an in-process authorization service and a stub credential for the throwaway wallet, and ends by saying how many gateway calls carried the token. Add `STUB_AUTH_REFUSE=true` to see a payment go ahead without one.
+
+**A real session** also needs:
+- `PRIVATE_KEY`: the wallet your Known to Atum credential is issued to. The same wallet pays.
+- `CREDENTIAL_FILE`: the path to that credential, the JSON Atum issued during onboarding. `credential.json` is gitignored.
+- `AUTH_URL`, only for another environment. It defaults to the testnet authorization service, `https://auth.production-testnet.atum.xyz`. Use the same environment as your credential: a testnet credential is not valid on mainnet.
+
+**A failed renewal never fails a payment.** There is no refresh, so the source starts a new session shortly before the token expires, in the background, while the held token is still sent. If that fails, it keeps sending the held token while it is valid. Once none is valid, the calls go without one, as an anonymous caller, and the client prints why. It tries again no sooner than the service's `Retry-After`, or 10 seconds when the service named none.
+
 ## Project structure
 
 ```
@@ -222,6 +242,7 @@ src/
 ├── client.ts        # prepare → sign → submit → collect
 ├── display.ts       # Shared terminal chrome (banner, corridor, amount)
 ├── purchase.ts      # waitForStatus until the payment is terminal
+├── stub-auth.ts     # in-process authorization service for stub session runs
 └── stub-gateway.ts  # in-process gateway for stub runs and smoke tests
 ```
 
