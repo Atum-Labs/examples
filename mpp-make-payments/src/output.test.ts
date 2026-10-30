@@ -94,6 +94,7 @@ test("an HTTP 400 with no receipt does not claim destination arrival", async () 
         `expected unavailable settlement details:\n${result.output}`,
       );
       assert.doesNotMatch(result.output, /arrived/, `HTTP 400 must not claim arrival:\n${result.output}`);
+      assert.match(result.output, /re-run with PURCHASE_ID=order_[0-9a-f]+/, `expected how to resume:\n${result.output}`);
     },
   );
 });
@@ -126,6 +127,7 @@ async function assertStubArrivalWithoutRealBanner(env: Record<string, string>): 
         /Destination  Tempo \(Moderato\) pathUSD — arrived \(stub\)/,
         `expected stub destination arrival:\n${result.output}`,
       );
+      assert.doesNotMatch(result.output, /not yet final/, `a completed payout is final:\n${result.output}`);
     },
   );
 }
@@ -194,6 +196,7 @@ test("a receipt for a real payment is not labelled stub and links its payout", a
       assert.match(result.output, /arrived/, `expected arrival from dest chain:\n${result.output}`);
       assert.doesNotMatch(result.output, /arrived \(stub\)/, `a real payment must not read as stub:\n${result.output}`);
       assert.match(result.output, new RegExp(`destination payout: .*${payout}`), `expected the payout link:\n${result.output}`);
+      assert.match(result.output, /payout on chain, not yet final \(finalizing\)/, `a finalizing payout must say so:\n${result.output}`);
     },
   );
 });

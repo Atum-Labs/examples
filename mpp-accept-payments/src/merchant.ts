@@ -13,6 +13,11 @@ import {
   buildChargeChallenge,
   buildChargeRequest,
   corridorFromDefaults,
+  gatewayRefusalOf,
+  isPaymentRejected,
+  isPaymentRetryable,
+  isSettlementPending,
+  SettlementPendingError,
   type AtumEscrowCorridor,
   type AtumEscrowReceipt,
   type PaymentSubmitter,
@@ -275,24 +280,60 @@ function logSettlement(transactions: PaymentSubmitResult["transactions"]): void 
   });
 }
 
+// An error message with GATEWAY_URL replaced by its origin. The gateway client quotes its base
+// URL in some errors (a timeout, for one), and that URL can carry a credential.
+function withoutGatewayUrl(message: string): string {
+  const base = GATEWAY_URL.replace(/\/+$/, "");
+  return base && base !== GATEWAY_LABEL ? message.split(base).join(GATEWAY_LABEL) : message;
+}
+
+// Names an error the submitter could not classify without printing its message: the error's
+// type, and the HTTP status when there was one.
+function describeUnknownError(err: unknown): string {
+  const { name, status } = (err ?? {}) as { name?: unknown; status?: unknown };
+  const type = typeof name === "string" && name !== "" ? name : "error";
+  return typeof status === "number" ? `${type}, HTTP ${status}` : type;
+}
+
 // Wrap a submitter so every outcome is legible in the merchant's log: the on-chain tx
-// hashes on success (the one-glance "did the funds move?" check), and otherwise which of
-// the two non-settled outcomes it was — they call for opposite things from the payer.
+// hashes once the payout is made (the one-glance "did the funds move?" check), and otherwise
+// which outcome it was — they call for different things from the payer.
 function withSettlementLog(submitter: PaymentSubmitter): PaymentSubmitter {
   return {
-    async submit(request) {
-      const result = await submitter.submit(request);
+    async submit(request, context) {
+      let result: PaymentSubmitResult;
+      try {
+        result = await submitter.submit(request, context);
+      } catch (err) {
+        if (isPaymentRetryable(err)) {
+          console.log(`⏳  → 402: the gateway could not take the payment (${err.code}); nothing was charged — the payer re-attempts`);
+        } else if (isPaymentRejected(err)) {
+          console.log(`  ⚠️  → 400: the gateway refused the payment (${err.code}); nothing was charged — the request must change`);
+        } else if (isSettlementPending(err)) {
+          console.log(
+            `⏳  → 402: the submission's outcome is unknown (${describeUnknownError(err.cause)}); ` +
+              `a payment may exist — the payer re-attempts the same purchase`,
+          );
+        } else {
+          console.log(`  ⚠️  submit failed (${describeUnknownError(err)})`);
+        }
+        throw err;
+      }
       // The same rule verify() applies before it issues a receipt: the gateway says the payout
       // is made (finalizing or completed) and lists it under transactions.fulfillment.
       const paidOut =
         (result.status === "finalizing" || result.status === "completed") && result.transactions?.fulfillment;
       if (paidOut) {
         logSettlement(result.transactions);
-      } else if (result.status === "failed") {
+      } else if (result.status === "failed" || result.status === "refunded") {
         console.log(
           `  ⚠️  payment ${result.payment_id} ${result.status} — terminal; paying for the same ` +
             `goods again needs a NEW purchase id`,
         );
+      } else if (result.status === "refunding" || result.status === "refund_available") {
+        // Not delivered, but not final either: a late delivery can still complete it, so the
+        // payer must not pay for the same goods under a new purchase id yet.
+        console.log(`⏳  → 402: payment ${result.payment_id} ${result.status} — not delivered; its deposit is still in escrow`);
       } else {
         console.log(`⏳  → 402: still settling (payment ${result.payment_id})`);
       }
@@ -387,7 +428,7 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
 
   // Real settlement: one gateway client both discovers the corridor addresses and
   // submits the payment.
-  const { PaymentGatewayClient } = await import("@atumlabs/payment-gateway-client");
+  const { PaymentGatewayClient, submitPaymentShadow } = await import("@atumlabs/payment-gateway-client");
   const gateway = new PaymentGatewayClient({ BASE: GATEWAY_URL });
   const [destToken, sourceToken] = await Promise.all([
     gatewayTokenMetadata(gateway, DEST_NETWORK, DEST_ASSET),
@@ -411,10 +452,30 @@ async function setup(): Promise<{ corridor: AtumEscrowCorridor; submitter: Payme
   // lets verify() tell a payment still settling from one that failed; those two need
   // opposite responses from the payer. `transactions` is where verify() reads the payout
   // from, so pass it through unchanged.
+  //
+  // When the gateway refuses the payment, gatewayRefusalOf tells the payer whether to fix the
+  // request or re-attempt it shortly. Any other error — a timeout, a 5xx, a dropped connection
+  // — leaves the outcome unknown: the gateway may have taken the payment. That is answered as
+  // still settling, so the payer re-attempts the SAME purchase, which resolves onto that
+  // payment if it exists. Answered as a failure, it would send the payer to pay again under a
+  // new purchase id. `context.shadow` adds diagnostic headers only.
   const submitter: PaymentSubmitter = {
-    async submit(request) {
-      const res = await gateway.payments.submitPayment({ requestBody: request as never });
-      return { payment_id: res.payment_id, status: res.status, transactions: res.transactions };
+    async submit(request, context) {
+      try {
+        const res = await gateway.payments.submitPayment({
+          requestBody: request as never,
+          ...submitPaymentShadow(context?.shadow),
+        });
+        return { payment_id: res.payment_id, status: res.status, transactions: res.transactions };
+      } catch (err) {
+        const refusal = gatewayRefusalOf(err);
+        if (refusal) throw refusal;
+        const unknown = new SettlementPendingError({
+          detail: `the submission's outcome is unknown (${describeUnknownError(err)}), so a payment may exist`,
+        });
+        unknown.cause = err;
+        throw unknown;
+      }
     },
   };
   return { corridor, submitter: withSettlementLog(submitter) };
@@ -438,18 +499,18 @@ const RESOURCE_BODY = {
   },
 };
 
-// The Atum payment a settled request was funded by, read back off the Payment-Receipt
-// header mppx sets on the 200. That id — not the request, and not the purchase
-// identifier — is what fulfilment is keyed on: two payers can name their purchases the
-// same thing, and they are still two different payments.
-function paymentIdOf(res: http.ServerResponse): string | undefined {
+// The Atum payment a settled request was funded by, and its state, read back off the
+// Payment-Receipt header mppx sets on the 200. That id — not the request, and not the
+// purchase identifier — is what fulfilment is keyed on: two payers can name their purchases
+// the same thing, and they are still two different payments.
+function receiptOf(res: http.ServerResponse): Partial<Pick<AtumEscrowReceipt, "paymentId" | "state">> {
   const header = res.getHeader("payment-receipt");
-  if (typeof header !== "string") return undefined;
+  if (typeof header !== "string") return {};
   try {
-    const receipt = Receipt.deserialize(header) as AtumEscrowReceipt;
-    return receipt.paymentId;
+    const { paymentId, state } = Receipt.deserialize(header) as AtumEscrowReceipt;
+    return { paymentId, state };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -467,10 +528,17 @@ async function main() {
 
   // registerServer takes no corridor: it trusts the HMAC-bound challenge that mppx
   // verifies before verify() runs. One registration serves every corridor you advertise.
+  //
+  // settleAt "finalizing" serves the resource as soon as the payout is on chain, before its
+  // chain has made it final. That is the fast path, and it accepts a risk: if a reorganization
+  // drops the payout before it is final, the payer is refunded and the resource was served
+  // unpaid. "completed" waits for finality, seconds on some chains and minutes on others, and
+  // answers "still settling" until then. Choose per what you deliver: a report is cheap to
+  // serve twice, a shipment is not.
   const mppx = Mppx.create({
     realm: REALM,
     secretKey: SECRET_KEY,
-    methods: [registerServer({ submitter })],
+    methods: [registerServer({ submitter, settleAt: "finalizing" })],
   });
 
   const ledger = new PaymentLedger<typeof RESOURCE_BODY>();
@@ -538,7 +606,7 @@ async function main() {
       // Paid. mppx has set the Payment-Receipt header; deliver against the PAYMENT it
       // names, not against this request — see ./payments.ts.
       res.setHeader("Content-Type", "application/json");
-      const paymentId = paymentIdOf(res);
+      const { paymentId, state } = receiptOf(res);
       if (paymentId) {
         const already = ledger.served(paymentId);
         if (already) {
@@ -550,14 +618,16 @@ async function main() {
         }
         ledger.record(paymentId, RESOURCE_BODY);
       }
+      // A finalizing payout is on chain but can still be dropped; say so where it is served.
+      const notFinal = state === "finalizing" ? " (finalizing: payout on chain, not yet final)" : "";
       console.log(
         USE_STUB_SUBMITTER
-          ? `✅  → 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}`
-          : `✅  → 200: settled${paymentId ? ` — payment ${paymentId}` : ""}`,
+          ? `✅  → 200: settled (stub — no funds moved)${paymentId ? ` — payment ${paymentId}` : ""}${notFinal}`
+          : `✅  → 200: settled${paymentId ? ` — payment ${paymentId}` : ""}${notFinal}`,
       );
       res.end(JSON.stringify(RESOURCE_BODY));
     } catch (err) {
-      console.error(`[${reqId}] merchant route error:`, (err as Error).message);
+      console.error(`[${reqId}] merchant route error:`, withoutGatewayUrl(String((err as Error)?.message ?? err)));
       if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Payment verification or settlement failed." }));
     }

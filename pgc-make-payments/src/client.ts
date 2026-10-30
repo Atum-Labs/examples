@@ -19,7 +19,7 @@ import {
   defaultGateway,
 } from "@atumlabs/payment-gateway-client";
 import { collectPayment } from "./purchase.js";
-import { startStubGateway } from "./stub-gateway.js";
+import { STUB_OUTCOMES, startStubGateway } from "./stub-gateway.js";
 import { assetName, banner, corridorLabel, formatAmount, line, logArrival, settledAfter } from "./display.js";
 
 const USE_STUB_GATEWAY = (process.env.USE_STUB_GATEWAY ?? "true") !== "false";
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   const stub = USE_STUB_GATEWAY
     ? await startStubGateway({
         pendingAttempts: Number(process.env.STUB_PENDING_ATTEMPTS ?? 0),
-        settleAs: process.env.STUB_SETTLE_AS === "failed" ? "failed" : "completed",
+        settleAs: STUB_OUTCOMES.find((o) => o === process.env.STUB_SETTLE_AS) ?? "completed",
       })
     : undefined;
   // Comes from the published client so a host change is not a second literal here.

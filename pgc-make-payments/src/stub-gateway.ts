@@ -26,11 +26,16 @@ const STUB_DEFAULTS = {
   },
 };
 
+/** How a stub payment ends: delivered, failed, refunded, or waiting on its refund. */
+export type StubOutcome = "completed" | "failed" | "refunded" | "refund_available";
+
+export const STUB_OUTCOMES: readonly StubOutcome[] = ["completed", "failed", "refunded", "refund_available"];
+
 export interface StubGatewayOptions {
   /** First N status checks report `pending`, then terminal (`settleAs`). Default: 0. */
   pendingAttempts?: number;
-  /** The terminal status this payment settles to, once pendingAttempts is exhausted. Default: "completed". */
-  settleAs?: "completed" | "failed";
+  /** The status this payment ends in, once pendingAttempts is exhausted. Default: "completed". */
+  settleAs?: StubOutcome;
 }
 
 export interface StubGateway {
@@ -64,8 +69,18 @@ const STUB_TRANSACTIONS = {
 };
 
 // completed carries its transactions; failed carries an error instead — mirrors the real
-// gateway, where a failed payment never reaches fulfillment.
-function terminalBody(replay: boolean, status: "completed" | "failed") {
+// gateway, where a failed payment never reaches fulfillment. A refunded payment or one waiting
+// on its refund was not delivered either, so it lists only the deposit.
+function terminalBody(replay: boolean, status: StubOutcome) {
+  if (status === "refunded" || status === "refund_available") {
+    return {
+      payment_id: STUB_PAYMENT_ID,
+      status,
+      idempotent_replay: replay,
+      quote_id: "quote_stub",
+      transactions: { deposit: STUB_TRANSACTIONS.deposit },
+    };
+  }
   if (status === "failed") {
     return {
       payment_id: STUB_PAYMENT_ID,
@@ -148,13 +163,8 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
           send(res, 200, { payment_id: paymentId, status: "pending" });
           return;
         }
-        send(
-          res,
-          200,
-          settleAs === "failed"
-            ? { payment_id: paymentId, status: "failed", error: { code: "SETTLEMENT_FAILED", message: "stub: settlement forced to fail (settleAs)" } }
-            : { payment_id: paymentId, status: "completed", transactions: STUB_TRANSACTIONS },
-        );
+        const { idempotent_replay: _replay, quote_id: _quote, ...status } = terminalBody(false, settleAs);
+        send(res, 200, status);
         return;
       }
 

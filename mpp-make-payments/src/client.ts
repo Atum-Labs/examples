@@ -15,7 +15,7 @@ import {
   type AtumEscrowChallenge,
 } from "@atumlabs/mppx-atum-escrow/client";
 import { describeError, payPurchase } from "./purchase.js";
-import { banner, line, logArrival, settledAfter } from "./display.js";
+import { banner, detail, line, logArrival, settledAfter } from "./display.js";
 
 const { PRIVATE_KEY, MERCHANT_URL = "http://localhost:4030/paid", RPC_URL, PURCHASE_ID, GATEWAY_URL } =
   process.env;
@@ -78,7 +78,13 @@ if (!PRIVATE_KEY) {
 // An empty GATEWAY_URL (a blank line in .env) means unset.
 const gatewayUrl = GATEWAY_URL || undefined;
 const trust = gatewayUrl ? atumGatewayTrust({ gateways: [gatewayUrl] }) : undefined;
-console.log(`Trusting the corridors vouched for by ${gatewayUrl ?? "Atum's production gateways"}.`);
+// Printed as its origin: a gateway URL can carry a credential in its path or query.
+const trustedLabel = !gatewayUrl
+  ? "Atum's production gateways"
+  : URL.canParse(gatewayUrl)
+    ? new URL(gatewayUrl).origin
+    : "(GATEWAY_URL is not a valid URL)";
+console.log(`Trusting the corridors vouched for by ${trustedLabel}.`);
 
 // Register `atum-escrow` on the mppx client. The private key is bound to the
 // challenge's source chain automatically, so one registration pays any supported source.
@@ -157,6 +163,7 @@ function payoutFromReceipt(header: string | null): {
   stub: boolean;
   chainId?: string;
   hash?: string;
+  state?: string;
 } | undefined {
   if (!header) {
     logUnavailable("no receipt");
@@ -166,6 +173,7 @@ function payoutFromReceipt(header: string | null): {
     const receipt = Receipt.deserialize(header) as {
       reference?: string;
       paymentId?: string;
+      state?: string;
       destinationChainId?: string;
     };
     if (!receipt.destinationChainId && !receipt.reference) {
@@ -178,6 +186,7 @@ function payoutFromReceipt(header: string | null): {
       stub: receipt.paymentId?.startsWith("pay_stub_") ?? false,
       chainId: receipt.destinationChainId,
       hash: receipt.reference,
+      state: receipt.state,
     };
   } catch {
     logUnavailable("unreadable receipt");
@@ -215,9 +224,15 @@ try {
     if (payout) {
       console.log(settledAfter(1));
       logArrival({ destNetwork: payout.chainId, destHash: payout.hash, stub: payout.stub });
+      // The merchant served on a payout that is on chain but not yet final; it normally becomes
+      // completed, and if a reorganization drops it instead, the deposit is refunded.
+      if (payout.state === "finalizing") detail("payout on chain, not yet final (finalizing)");
     }
   } else {
     logUnavailable(`HTTP ${response.status}`);
+    // The purchase id is what makes another attempt safe: it resolves onto any payment
+    // already made instead of charging again.
+    console.log(`To re-attempt this purchase, re-run with PURCHASE_ID=${purchaseId}`);
   }
   console.log(`Status: ${response.status}`);
   if (receipt) console.log("Payment-Receipt header: present");

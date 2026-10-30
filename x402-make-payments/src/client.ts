@@ -70,7 +70,13 @@ if (!PRIVATE_KEY) {
 // An empty GATEWAY_URL (a blank line in .env) means unset, both here and in the SDK.
 const gatewayUrl = GATEWAY_URL || undefined;
 const trust = gatewayUrl ? atumGatewayTrust({ gateways: [gatewayUrl] }) : undefined;
-console.log(`Trusting the corridors vouched for by ${gatewayUrl ?? "Atum's production gateways"}.`);
+// Printed as its origin: a gateway URL can carry a credential in its path or query.
+const trustedLabel = !gatewayUrl
+  ? "Atum's production gateways"
+  : URL.canParse(gatewayUrl)
+    ? new URL(gatewayUrl).origin
+    : "(GATEWAY_URL is not a valid URL)";
+console.log(`Trusting the corridors vouched for by ${trustedLabel}.`);
 
 const client = new x402Client();
 registerAtumEscrowScheme(client, { signer: wallet, ...(trust ? { trust } : {}) });

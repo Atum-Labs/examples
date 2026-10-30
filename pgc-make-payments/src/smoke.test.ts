@@ -108,6 +108,32 @@ test("a payment that settles as failed surfaces as a terminal error, not a silen
   );
 });
 
+// A payment waiting on its refund is not final: a late delivery can still complete it. The
+// payer must be told not to pay again, and how to reach the refund, by the payment's id.
+test("a payment waiting on its refund names the payment and says not to pay again", async () => {
+  const result = await runClient({
+    ...STUB_ENV,
+    PRIVATE_KEY: randomPrivateKey(),
+    STUB_SETTLE_AS: "refund_available",
+  });
+  assert.notEqual(result.exitCode, 0, `a refund is not a delivery:\n${result.output}`);
+  assert.match(result.output, /payment pay_stub_\w+ is refund_available/, `expected the payment id:\n${result.output}`);
+  assert.match(result.output, /Do not pay again/, `expected the warning:\n${result.output}`);
+  assert.match(result.output, /npx payment-status pay_stub_\w+/, `expected how to read the refund:\n${result.output}`);
+  assert.doesNotMatch(result.output, /Status: completed/, `must not report completion:\n${result.output}`);
+});
+
+test("a refunded payment surfaces as terminal, not as a success", async () => {
+  const result = await runClient({
+    ...STUB_ENV,
+    PRIVATE_KEY: randomPrivateKey(),
+    STUB_SETTLE_AS: "refunded",
+  });
+  assert.notEqual(result.exitCode, 0, `a refund is not a delivery:\n${result.output}`);
+  assert.match(result.output, /refunded and nothing was delivered/, `expected the terminal error:\n${result.output}`);
+  assert.doesNotMatch(result.output, /Status: completed/, `must not report completion:\n${result.output}`);
+});
+
 test("resuming a payment reuses its request id instead of generating a new one", async () => {
   const requestId = "pmt_resumed_0123456789";
   const result = await runClient({
