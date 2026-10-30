@@ -66,14 +66,10 @@ function successfulReceipt(): string {
     method: "atum-escrow",
     status: "success",
     timestamp: new Date().toISOString(),
-    reference: "pay_stub_output",
-    fulfillmentConfirmation: {
-      stub: true,
-      destination_chain_id: "eip155:42431",
-      destination_tx_hash: `0x${"22".repeat(32)}`,
-      source_chain_id: "eip155:84532",
-      source_tx_hash: `0x${"11".repeat(32)}`,
-    },
+    reference: `0x${"22".repeat(32)}`,
+    paymentId: "pay_stub_output",
+    state: "completed",
+    destinationChainId: "eip155:42431",
   } as Receipt.Receipt);
 }
 
@@ -98,6 +94,7 @@ test("an HTTP 400 with no receipt does not claim destination arrival", async () 
         `expected unavailable settlement details:\n${result.output}`,
       );
       assert.doesNotMatch(result.output, /arrived/, `HTTP 400 must not claim arrival:\n${result.output}`);
+      assert.match(result.output, /re-run with PURCHASE_ID=order_[0-9a-f]+/, `expected how to resume:\n${result.output}`);
     },
   );
 });
@@ -130,6 +127,7 @@ async function assertStubArrivalWithoutRealBanner(env: Record<string, string>): 
         /Destination  Tempo \(Moderato\) pathUSD — arrived \(stub\)/,
         `expected stub destination arrival:\n${result.output}`,
       );
+      assert.doesNotMatch(result.output, /not yet final/, `a completed payout is final:\n${result.output}`);
     },
   );
 }
@@ -168,16 +166,16 @@ test("a 200 with no receipt does not print Payment settled", async () => {
   );
 });
 
-test("a real confirmation without a dest hash is not labelled stub", async () => {
+test("a receipt for a real payment is not labelled stub and links its payout", async () => {
+  const payout = `0x${"ab".repeat(32)}`;
   const header = Receipt.serialize({
     method: "atum-escrow",
     status: "success",
     timestamp: new Date().toISOString(),
-    reference: "pay_real_no_hash",
-    fulfillmentConfirmation: {
-      destination_chain_id: "eip155:42431",
-      source_chain_id: "eip155:84532",
-    },
+    reference: payout,
+    paymentId: `0x${"cd".repeat(32)}`,
+    state: "finalizing",
+    destinationChainId: "eip155:42431",
   } as Receipt.Receipt);
   await withStub(
     (_req, res) => {
@@ -196,7 +194,9 @@ test("a real confirmation without a dest hash is not labelled stub", async () =>
       });
       assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
       assert.match(result.output, /arrived/, `expected arrival from dest chain:\n${result.output}`);
-      assert.doesNotMatch(result.output, /arrived \(stub\)/, `missing dest hash must not imply stub:\n${result.output}`);
+      assert.doesNotMatch(result.output, /arrived \(stub\)/, `a real payment must not read as stub:\n${result.output}`);
+      assert.match(result.output, new RegExp(`destination payout: .*${payout}`), `expected the payout link:\n${result.output}`);
+      assert.match(result.output, /payout on chain, not yet final \(finalizing\)/, `a finalizing payout must say so:\n${result.output}`);
     },
   );
 });

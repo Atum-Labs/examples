@@ -56,7 +56,7 @@ order books-123 → payment 1 (books-123-1) → FAILED   ← that identifier is 
                 → payment 2 (books-123-2) → settles  ← the order is paid
 ```
 
-So derive it from both — your order id plus a counter you bump for each new payment attempt at that order: `` `${order.id}-${order.paymentAttempts}` ``. Reuse it on every attempt at one payment; never across two purchases — the second would resolve onto the first payment, so the buyer gets the goods twice and the merchant is paid once. Nothing can detect that, which is why the merchant keys fulfilment on the receipt's `payment_id` (see [`mpp-accept-payments`](../mpp-accept-payments)).
+So derive it from both — your order id plus a counter you bump for each new payment attempt at that order: `` `${order.id}-${order.paymentAttempts}` ``. Reuse it on every attempt at one payment; never across two purchases — the second would resolve onto the first payment, so the buyer gets the goods twice and the merchant is paid once. Nothing can detect that, which is why the merchant keys fulfilment on the receipt's `paymentId` (see [`mpp-accept-payments`](../mpp-accept-payments)).
 
 This example pays for one purchase per run, so it generates an identifier per run and prints it. Pass `PURCHASE_ID` **only** to resume a payment interrupted while still settling — never set it in `.env`, or every run would re-attempt the same payment and later runs would be served without paying.
 

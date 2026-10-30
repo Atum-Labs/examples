@@ -17,10 +17,11 @@ import {
   isTerminalStatus,
   assetChainId,
   defaultGateway,
+  type PaymentTransactions,
 } from "@atumlabs/payment-gateway-client";
 import { collectPayment } from "./purchase.js";
-import { startStubGateway } from "./stub-gateway.js";
-import { assetName, banner, corridorLabel, formatAmount, line, logArrival, settledAfter } from "./display.js";
+import { STUB_OUTCOMES, startStubGateway } from "./stub-gateway.js";
+import { assetName, banner, corridorLabel, detail, formatAmount, line, logArrival, settledAfter } from "./display.js";
 
 const USE_STUB_GATEWAY = (process.env.USE_STUB_GATEWAY ?? "true") !== "false";
 
@@ -162,7 +163,8 @@ async function main(): Promise<void> {
   const stub = USE_STUB_GATEWAY
     ? await startStubGateway({
         pendingAttempts: Number(process.env.STUB_PENDING_ATTEMPTS ?? 0),
-        settleAs: process.env.STUB_SETTLE_AS === "failed" ? "failed" : "completed",
+        finalizingChecks: Number(process.env.STUB_FINALIZING_CHECKS ?? 0),
+        settleAs: STUB_OUTCOMES.find((o) => o === process.env.STUB_SETTLE_AS) ?? "completed",
       })
     : undefined;
   // Comes from the published client so a host change is not a second literal here.
@@ -230,31 +232,51 @@ async function main(): Promise<void> {
       console.log(`  ♻️  handed back existing payment ${submitted.payment_id} — nothing additional was charged`);
     }
 
+    // The deposit and payout are shown as soon as the payout is on chain (`finalizing`), not
+    // only once it is final: the payout hash is known then, and on a chain slow to finalize
+    // `completed` comes minutes later. Shown once, from whichever answer names it first.
+    let payoutShown = false;
+    const showPayout = (snapshot: { status?: string; transactions?: PaymentTransactions }): void => {
+      if (payoutShown) return;
+      payoutShown = true;
+      const { deposit, fulfillment } = snapshot.transactions ?? {};
+      console.log(settledAfter(1, `— payment ${submitted.payment_id}`));
+      logArrival({
+        destNetwork: fulfillment?.chain_id ?? DEST_NETWORK,
+        destAsset: DEST_ASSET,
+        destHash: fulfillment?.transaction_hash,
+        sourceNetwork: deposit?.chain_id,
+        sourceHash: deposit?.transaction_hash,
+        stub: USE_STUB_GATEWAY,
+      });
+      if (snapshot.status === "finalizing") detail("payout on chain, not yet final (finalizing)");
+    };
+
+    if (submitted.status === "finalizing") showPayout(submitted);
     const outcome = isTerminalStatus(submitted.status)
       ? { status: submitted.status, snapshot: submitted }
-      : await collectPayment(() => client.payments.getPaymentStatus({ paymentId: submitted.payment_id }));
+      : await collectPayment(() => client.payments.getPaymentStatus({ paymentId: submitted.payment_id }), {
+          onPayout: showPayout,
+        });
 
-    if (outcome.status !== "completed") {
+    if (outcome.status !== "completed" && outcome.status !== "finalizing") {
       throw new Error(
         `payment ${submitted.payment_id} ${outcome.status} and nothing was delivered. ` +
           `That request id now resolves to this payment for good — start another under a NEW id.`,
       );
     }
 
-    const confirmation =
-      "fulfillment_confirmation" in outcome.snapshot
-        ? outcome.snapshot.fulfillment_confirmation
-        : undefined;
-    console.log(settledAfter(1, `— payment ${submitted.payment_id}`));
-    logArrival({
-      destNetwork: confirmation?.destination_chain_id ?? DEST_NETWORK,
-      destAsset: DEST_ASSET,
-      destHash: confirmation?.destination_tx_hash,
-      sourceNetwork: confirmation?.source_chain_id,
-      sourceHash: confirmation?.source_tx_hash,
-      stub: USE_STUB_GATEWAY,
-    });
+    showPayout(outcome.snapshot);
     console.log(`Status: ${outcome.status}`);
+    if (outcome.status === "finalizing") {
+      // Paid on chain, but the wait ended before its chain made the payout final. It normally
+      // becomes completed; exit 5 says so, as send-payment does, without reporting a failure.
+      console.log(
+        `Payment ${submitted.payment_id} is paid on chain but not yet final. Check it with ` +
+          `\`npx payment-status ${submitted.payment_id}\`, or re-run with REQUEST_ID=${requestId} to wait again.`,
+      );
+      process.exitCode = 5;
+    }
   } finally {
     try {
       await stub?.close();

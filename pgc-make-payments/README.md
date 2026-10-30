@@ -13,7 +13,7 @@ The client handles the full payment flow automatically:
 1. Builds a payment request — corridor contract addresses come from the gateway's `GET /v1/defaults`, not from config.
 2. Signs a Permit2 authorization for the source token — signing itself costs nothing on-chain, and the escrow deposit executes only when the gateway settles. (In real mode the client also sends a one-off `approve(Permit2)` transaction if your allowance is short — see [Going to testnet / mainnet](#going-to-testnet--mainnet).)
 3. Submits the signed request.
-4. If settlement outruns the gateway's synchronous window, follows the **same request id** until it reaches a terminal outcome — see [Retries and idempotency](#retries-and-idempotency).
+4. If settlement outruns the gateway's synchronous window, follows the **same request id** until the payment completes or ends — see [Retries and idempotency](#retries-and-idempotency).
 
 ## Retries and idempotency
 
@@ -22,10 +22,13 @@ Cross-chain settlement can take longer than the gateway holds a connection open 
 | Status | Meaning | What to do |
 | --- | --- | --- |
 | `pending` | Accepted, still settling | Wait, or re-submit the **same** `request_id` |
+| `finalizing` | The payout is on chain, not yet final | Wait for `completed`; it normally follows within seconds to minutes |
 | `completed` | Delivered | Done |
-| `failed` / `cancelled` | Terminal | That id is spent; the same corridor needs a **new** `request_id` |
+| `refunding` | Not delivered; the deposit is being returned | Wait; it can still complete |
+| `refund_available` | Not delivered; the deposit is still in escrow | Do **not** pay again: a late delivery can still complete it. To return the funds, read `refund_signature` with `npx payment-status` and the payment id the run printed, and submit it to the source escrow |
+| `failed` / `refunded` | Terminal | That id is spent; the same corridor needs a **new** `request_id` |
 
-x402 and MPP collect a slow settlement by re-attempting the purchase (a fresh 402, a new signature). PGC has no 402. The SDK's collection mechanism is `waitForTerminalStatus` — the same helper behind `send-payment --wait` — which looks the payment up by `payment_id`. Re-submitting the same `request_id` also returns the current state, but it rebuilds and re-sends the payment to do so.
+x402 and MPP collect a slow settlement by re-attempting the purchase (a fresh 402, a new signature). PGC has no 402. The SDK's collection mechanism is `waitForStatus` — the same helper behind `send-payment --wait` — which looks the payment up by `payment_id`. This example shows the deposit and payout as soon as the payout is on chain (`finalizing`) and keeps waiting for `completed`. `npm run pay` exits `0` once the payment completes, and `5` if the wait ends with the payout on chain but not yet final, naming the payment to check with `npx payment-status`. Re-submitting the same `request_id` also returns the current state, but it rebuilds and re-sends the payment to do so.
 
 [`src/purchase.ts`](src/purchase.ts) waits:
 
@@ -114,9 +117,9 @@ To watch the wait that resolves a slow settlement, run with `STUB_PENDING_ATTEMP
 
 The same package ships command-line tools. After `npm install` they are on `npx`. The interesting split is **prepare and sign, review, then submit** — the document `--prepare-only` writes is not a description of the payment, it *is* the payment.
 
-Widen the quote window if you intend to submit later, but only by tens of seconds. The default is 10s; an over-long window ends in a terminal `QUOTES_EXPIRED`. `--submit` signs nothing and needs no private key. Treat the prepared file like a signed cheque.
+Widen the quote window if you intend to submit later, but only by tens of seconds. The default is 3s; an over-long window ends in a terminal `QUOTES_EXPIRED`. The fulfillment window defaults to 5 minutes, after which an undelivered payment is refunded; for a large payment pass a longer `--fulfillment-deadline-seconds` (for example `3600`), since a settler may wait for the source chain to finalize a large deposit and does not bid on a deadline that wait does not fit. `--submit` signs nothing and needs no private key. Treat the prepared file like a signed cheque.
 
-`send-payment`'s exit code tells you the outcome without parsing output: `0` completed, `2` pending (follow up with `payment-status` or `--wait`), `3` failed (terminal — a retry needs a NEW `--request-id`), `1` unknown (bad args, unreachable gateway, or a request that may still have been accepted — re-run under the same `--request-id` to find out). This only describes a submitted payment; `--prepare-only`'s exit `0` just means the request was built and signed, not that anything was paid — don't chain a payment-conditional step off it.
+`send-payment`'s exit code tells you the outcome without parsing output: `0` completed, `5` finalizing (paid on chain, not yet final), `2` pending or refunding (follow up with `payment-status` or `--wait`), `4` refund_available (not delivered; submit `refund_signature`, do not pay again), `3` failed or refunded (terminal — a retry needs a NEW `--request-id`), `1` unknown (bad args, unreachable gateway, or a request that may still have been accepted — re-run under the same `--request-id` to find out). This only describes a submitted payment; `--prepare-only`'s exit `0` just means the request was built and signed, not that anything was paid — don't chain a payment-conditional step off it.
 
 Real CLI commands talk to a live gateway (they are not the stub). Replace the sender, destination, and key with your own; the corridor is the hardened Base Sepolia USDC → Tempo pathUSD path.
 
@@ -133,6 +136,7 @@ export DESTINATION=eip155:42431/erc20:0x20c0000000000000000000000000000000000000
 # 1. build and sign, submit nothing
 npx send-payment --prepare-only --gateway "$GATEWAY" \
   --quote-deadline-seconds 30 \
+  --max-source-amount 50010 \
   --request-id order_demo_1 \
   "$SENDER" 50000 \
   "$SOURCE" \
@@ -156,6 +160,7 @@ Or piped, with no file on disk:
 ```bash
 npx send-payment --prepare-only --gateway "$GATEWAY" \
   --quote-deadline-seconds 30 \
+  --max-source-amount 50010 \
   --request-id order_demo_1 \
   "$SENDER" 50000 "$SOURCE" "$DEST" "$DESTINATION" \
   | npx send-payment --submit - --gateway "$GATEWAY" --wait
@@ -165,6 +170,7 @@ One-shot (prepare, sign, and submit together):
 
 ```bash
 npx send-payment --gateway "$GATEWAY" --wait \
+  --max-source-amount 50010 \
   --request-id order_demo_1 \
   "$SENDER" 50000 "$SOURCE" "$DEST" "$DESTINATION"
 ```
@@ -191,7 +197,7 @@ Hermetic: the full prepare → sign → submit → collect flow runs against the
 
 ## Going to testnet / mainnet
 
-> **Cross-chain settlement can outrun the gateway's synchronous window (~30s)**, and on corridors like **Base ↔ Tempo** it often does. That is not a failure: `submitPayment` comes back `pending`, and `waitForTerminalStatus` (or a re-run under the same `REQUEST_ID`) collects the outcome.
+> **Cross-chain settlement can outrun the gateway's synchronous window (~30s)**, and on corridors like **Base ↔ Tempo** it often does. That is not a failure: `submitPayment` comes back `pending`, and `waitForStatus` (or a re-run under the same `REQUEST_ID`) collects the outcome.
 
 The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet corridor. To settle for real:
 
@@ -205,7 +211,7 @@ The shipped `.env.example` is wired for the **Base Sepolia → Tempo** testnet c
 
 6. Leave `GATEWAY_URL` unset to use the hosted testnet gateway (`https://payment-gw.production-testnet.atum.xyz`).
 
-On success the client prints the `payment_id` and fulfillment confirmation (source and destination transaction hashes). Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
+On success the client prints the `payment_id` and the payment's `transactions` (the source deposit and the destination payout). Verify the movement on `sepolia.basescan.org` (USDC leaves the payer wallet) and `explore.testnet.tempo.xyz` (pathUSD arrives — import token `0x20c0000000000000000000000000000000000000`, 6 decimals).
 
 For **mainnet** (where authorized by Atum), the steps are identical with Atum-authorized mainnet chains/tokens and the production gateway URL Atum provides.
 
@@ -215,7 +221,7 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 src/
 ├── client.ts        # prepare → sign → submit → collect
 ├── display.ts       # Shared terminal chrome (banner, corridor, amount)
-├── purchase.ts      # waitForTerminalStatus until the payment is terminal
+├── purchase.ts      # waitForStatus until the payment is terminal
 └── stub-gateway.ts  # in-process gateway for stub runs and smoke tests
 ```
 
