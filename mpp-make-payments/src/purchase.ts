@@ -28,9 +28,11 @@
 
 /**
  * The problem-details type mppx uses for a payment that needs another attempt. It covers
- * two causes: the payment is still settling (`paymentId` present — it reached the
- * gateway), or this attempt's authorization went stale before it could be submitted
- * (`paymentId` absent — nothing reached the gateway). Both are resolved by re-attempting.
+ * three kinds of answer: the payment is still settling (`paymentId` present — it reached
+ * the gateway), the gateway could not take it this time (`code` present — nothing was
+ * charged), or neither — this attempt's authorization went stale before it could be
+ * submitted, or the merchant could not learn the submission's outcome. All are resolved by
+ * re-attempting the same purchase, which never charges twice.
  */
 const PAYMENT_ACTION_REQUIRED = "https://paymentauth.org/problems/payment-action-required";
 
@@ -39,11 +41,29 @@ const PAYMENT_ACTION_REQUIRED = "https://paymentauth.org/problems/payment-action
 const DEFAULT_MAX_ATTEMPTS = 20;
 const DEFAULT_INTERVAL_MS = 5000;
 
-/** RFC 9457 problem details, plus the payment id mppx-atum-escrow adds to settlement errors. */
+/**
+ * RFC 9457 problem details, plus what mppx-atum-escrow adds: the payment id and the gateway's
+ * state on a payment still settling, and the gateway's code on a refusal worth re-attempting.
+ */
 interface PaymentProblem {
   type?: string;
   detail?: string;
   paymentId?: string;
+  state?: string;
+  code?: string;
+}
+
+/** Why this attempt is re-attempted, read from the answer the attempt got. */
+function reattemptReason(problem: PaymentProblem, paymentId: string | undefined): string {
+  if (typeof problem.code === "string") {
+    return `the gateway could not take the payment (${problem.code}); nothing was charged`;
+  }
+  if (problem.state === "refunding") {
+    // Not final: a late delivery can still complete it, so this payer must not pay for the
+    // same goods under a new purchase id while it waits.
+    return `payment ${paymentId} refunding — not delivered; its deposit is being returned`;
+  }
+  return paymentId ? `still settling (payment ${paymentId})` : "not settled yet, and no payment is named yet";
 }
 
 export interface PurchaseOptions {
@@ -98,8 +118,8 @@ export function describeError(err: unknown): string {
  *   it, and resubmit. The purchase identifier comes from the URL, so every attempt names
  *   the same payment.
  * @returns the response that settled, or a non-402 response the merchant answered with
- * @throws if the payment failed terminally, was refused, or never settled in time, or the
- *   network failed MAX_CONSECUTIVE_NETWORK_ERRORS times in a row
+ * @throws if the payment failed terminally, was refused, is waiting on the payer's refund, or
+ *   never settled in time, or the network failed MAX_CONSECUTIVE_NETWORK_ERRORS times in a row
  */
 export async function payPurchase(
   attempt: () => Promise<Response>,
@@ -147,10 +167,23 @@ export async function payPurchase(
     }
 
     paymentId = problem.paymentId ?? paymentId;
+    // The refund waits on this payer: nobody else submits it, so re-attempting does not help.
+    // It is not spent either — a late delivery can still complete it — so paying again under a
+    // new purchase id could pay twice.
+    if (problem.state === "refund_available") {
+      throw new Error(
+        `payment ${paymentId ?? "(unidentified)"} is refund_available: nothing was delivered and ` +
+          `the deposit is still in escrow. Do not pay for these goods under a new purchase id ` +
+          `while it is refund_available — a late delivery can still complete it, and re-running ` +
+          `this purchase under the same identifier collects that. To return the funds, read its ` +
+          `refund_signature from GET /v1/payments/${paymentId ?? "{paymentId}"}/status on the ` +
+          `gateway and submit it to the source chain's escrow.`,
+      );
+    }
     if (i === maxAttempts) break;
     console.log(
-      `  ⏳  ${paymentId ? `still settling (payment ${paymentId})` : "authorization went stale before submission"}` +
-        ` — ${elapsed()} elapsed, re-attempting in ${Math.round(intervalMs / 1000)}s`,
+      `  ⏳  ${reattemptReason(problem, paymentId)} — ${elapsed()} elapsed, ` +
+        `re-attempting in ${Math.round(intervalMs / 1000)}s`,
     );
     await sleep(intervalMs);
   }

@@ -203,3 +203,73 @@ test("does not re-attempt a URL fetch cannot parse", async () => {
   );
   assert.equal(attempts, 1, "a malformed MERCHANT_URL is a configuration error, not a network error");
 });
+
+// Each re-attempt says why, read from that attempt's answer: a payment still settling, a
+// refusal the gateway asks to retry (`code`, nothing charged), and a payment whose deposit is
+// being returned (`state`) all share the payment-action-required type and call for different
+// expectations from whoever is watching.
+test("names each re-attempt's reason from the answer that attempt got", async (t) => {
+  const answers: Record<string, unknown>[] = [
+    { type: PAYMENT_ACTION_REQUIRED, detail: "still settling", paymentId: "pay_1", state: "pending" },
+    { type: PAYMENT_ACTION_REQUIRED, detail: "try again shortly", code: "AUTHORIZATION_UNAVAILABLE" },
+    { type: PAYMENT_ACTION_REQUIRED, detail: "not delivered", paymentId: "pay_1", state: "refunding" },
+  ];
+  let attempts = 0;
+  const logged: string[] = [];
+  t.mock.method(console, "log", (...args: unknown[]) => logged.push(args.join(" ")));
+
+  await withServer(
+    (_req, res) => {
+      const answer = answers[attempts++];
+      if (answer) {
+        problem(res, answer);
+        return;
+      }
+      res.writeHead(200, { "payment-receipt": "sim" });
+      res.end(JSON.stringify({ ok: true }));
+    },
+    async (url) => {
+      const res = await payPurchase(() => fetch(url), { intervalMs: 10 });
+      assert.equal(res.status, 200);
+    },
+  );
+
+  const reasons = logged.filter((l) => l.includes("re-attempting in"));
+  assert.equal(reasons.length, 3, `expected one reason per re-attempt:\n${logged.join("\n")}`);
+  assert.match(reasons[0], /still settling \(payment pay_1\)/);
+  // A refusal after a pending attempt is still a refusal, not "still settling".
+  assert.match(reasons[1], /could not take the payment \(AUTHORIZATION_UNAVAILABLE\); nothing was charged/);
+  assert.match(reasons[2], /payment pay_1 refunding — not delivered; its deposit is being returned/);
+});
+
+// refund_available waits on the payer: nobody else submits the refund, so re-attempting cannot
+// change it. The payer is told how to get the deposit back, and not to pay again, since a late
+// delivery can still complete the payment.
+test("stops on refund_available and says how to return the deposit", async () => {
+  let attempts = 0;
+
+  await withServer(
+    (_req, res) => {
+      attempts++;
+      problem(res, {
+        type: PAYMENT_ACTION_REQUIRED,
+        detail: "not delivered",
+        paymentId: "pay_refund",
+        state: "refund_available",
+      });
+    },
+    async (url) => {
+      await assert.rejects(
+        () => payPurchase(() => fetch(url), { intervalMs: 10 }),
+        (err: Error) => {
+          assert.match(err.message, /payment pay_refund is refund_available/);
+          assert.match(err.message, /refund_signature from GET \/v1\/payments\/pay_refund\/status/);
+          assert.match(err.message, /Do not pay for these goods under a new purchase id/);
+          assert.doesNotMatch(err.message, /still settling/);
+          return true;
+        },
+      );
+      assert.equal(attempts, 1, "re-attempting cannot change a refund that waits on the payer");
+    },
+  );
+});
