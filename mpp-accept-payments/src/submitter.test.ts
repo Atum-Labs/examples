@@ -21,8 +21,8 @@ import { randomBytes } from "node:crypto";
 //   - a payout on chain but not yet final (finalizing), served with the receipt
 //   - a refusal the gateway asks to retry, which the payer re-attempts
 //   - a refusal whose request must change, which stops the payer
-//   - a payment waiting on its refund, collected once a late delivery completes it
-//   - an error with no classification, whose outcome is unknown
+//   - a payment waiting on its refund, which stops the payer with how to return the deposit
+//   - an error with no classification, or a dropped connection, whose outcome is unknown
 //
 // GATEWAY_URL carries a secret in its path, as a keyed URL does, and no log may print it.
 
@@ -56,10 +56,8 @@ function portAnswers(port: number): Promise<boolean> {
   });
 }
 
-interface GatewayAnswer {
-  status: number;
-  body: Record<string, unknown>;
-}
+// An HTTP answer, or "drop": the connection closes with no answer, as a network failure does.
+type GatewayAnswer = { status: number; body: Record<string, unknown> } | "drop";
 
 interface Submission {
   producer: string | undefined;
@@ -123,6 +121,10 @@ async function withGateway(
           depositRequestHashV2: req.headers["x-atum-deposit-request-hash-v2"] as string | undefined,
         });
         const answer = answers[Math.min(submissions.length, answers.length) - 1];
+        if (answer === "drop") {
+          req.socket.destroy();
+          return;
+        }
         res.writeHead(answer.status, { "content-type": "application/json" }).end(JSON.stringify(answer.body));
       });
       return;
@@ -297,18 +299,29 @@ test("real mode stops the payer on a refusal whose request must change, and says
   });
 });
 
-test("real mode reports a payment waiting on its refund as not delivered, then collects a late delivery", async () => {
+test("real mode stops the payer on a payment waiting on its refund, and says how to return the deposit", async () => {
+  // Nobody but the payer submits this refund, so re-attempting cannot change it; and a late
+  // delivery can still complete the payment, so the payer must not pay again under a new id.
   const refundAvailable: GatewayAnswer = {
     status: 200,
     body: { payment_id: PAYMENT_ID, status: "refund_available" },
   };
-  await withGateway([refundAvailable, paidOut("completed")], async (gatewayUrl, submissions) => {
+  await withGateway([refundAvailable], async (gatewayUrl, submissions) => {
     const run = await payThroughGateway(4163, gatewayUrl);
-    assert.equal(run.payerExitCode, 0, `payer exited non-zero:\n${run.payer}\n--- merchant ---\n${run.merchant}`);
-    assert.equal(submissions.length, 2, `expected the refund_available answer and the re-attempt:\n${run.merchant}`);
-    const notDelivered = new RegExp(`payment ${PAYMENT_ID} refund_available — not delivered; its deposit is still in escrow`);
-    assert.match(run.merchant, notDelivered, `the merchant must not call it still settling:\n${run.merchant}`);
-    assert.match(run.payer, notDelivered, `the payer must not call it still settling:\n${run.payer}`);
+    assert.notEqual(run.payerExitCode, 0, `a refund is not a delivery:\n${run.payer}`);
+    assert.equal(submissions.length, 1, `re-attempting cannot change a refund that waits on the payer:\n${run.merchant}`);
+    assert.match(
+      run.merchant,
+      new RegExp(`payment ${PAYMENT_ID} refund_available — not delivered; its deposit is still in escrow`),
+      `the merchant must not call it still settling:\n${run.merchant}`,
+    );
+    assert.match(run.payer, new RegExp(`payment ${PAYMENT_ID} is refund_available`), `expected the payment id:\n${run.payer}`);
+    assert.match(
+      run.payer,
+      new RegExp(`refund_signature from GET /v1/payments/${PAYMENT_ID}/status`),
+      `expected how to return the deposit:\n${run.payer}`,
+    );
+    assert.doesNotMatch(run.payer, /still settling/, `the payer must not end on "still settling":\n${run.payer}`);
     assertNoGatewaySecret(run);
   });
 });
@@ -328,6 +341,22 @@ test("real mode answers an unknown outcome as still settling, so the payer re-at
       `the merchant must log the unknown outcome:\n${run.merchant}`,
     );
     assert.doesNotMatch(run.payer, /NEW purchase id/, `an unknown outcome must not read as terminal:\n${run.payer}`);
+    assertNoGatewaySecret(run);
+  });
+});
+
+test("real mode names the network error when the connection to the gateway drops", async () => {
+  // A dropped connection reaches the merchant as a transport error with no HTTP status. Its
+  // code tells a wrong host from a refused or reset connection; the URL stays out of the log.
+  await withGateway(["drop", paidOut("completed")], async (gatewayUrl, submissions) => {
+    const run = await payThroughGateway(4165, gatewayUrl);
+    assert.equal(run.payerExitCode, 0, `payer exited non-zero:\n${run.payer}\n--- merchant ---\n${run.merchant}`);
+    assert.equal(submissions.length, 2, `expected the dropped attempt and the re-attempt:\n${run.merchant}`);
+    assert.match(
+      run.merchant,
+      /the submission's outcome is unknown \(\w+, ECONNRESET\); a payment may exist/,
+      `the merchant must name the network error:\n${run.merchant}`,
+    );
     assertNoGatewaySecret(run);
   });
 });

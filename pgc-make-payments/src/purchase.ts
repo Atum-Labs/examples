@@ -16,20 +16,23 @@ import {
 // again, and the merchant must not hold the payer's HTTP request open. PGC has
 // no 402 and no merchant — the client talks to the gateway directly — so the
 // collection mechanism is the one the SDK ships: waitForStatus (the same helper
-// behind `send-payment --wait`). This example waits for `completed`, the payout final,
-// because it reports a finished payment. `waitFor: "finalizing"` stops once the payout is on
-// chain, seconds to minutes sooner on some chains, accepting that it can still be dropped.
+// behind `send-payment --wait`). The payout is reported as soon as it is on chain
+// (`finalizing`), through `onPayout`, and the wait continues to `completed`, the payout
+// final: on a chain slow to finalize, that is minutes later. If the budget runs out first,
+// the outcome is `finalizing` — paid on chain, not yet final — never "unpaid".
 //
 // Re-submitting the same request_id also returns the current state, but it
 // rebuilds and re-sends the payment to do so. Status lookup is the cheaper
 // follow-up; this module uses that. A timed-out wait is not a failure — the
 // payment continues — and the printed request_id is what you re-run under.
 
-export interface CollectOptions {
+export interface CollectOptions<T extends PaymentSnapshot> {
   /** How long to keep checking, in milliseconds. Default: 120_000. */
   budgetMs?: number;
   /** Gap between checks, in milliseconds. Default: SDK's 2s. */
   intervalMs?: number;
+  /** Called with each answer that names the payout: `finalizing` or `completed`. */
+  onPayout?: (snapshot: T) => void;
 }
 
 const DEFAULT_BUDGET_MS = 120_000;
@@ -38,30 +41,37 @@ const DEFAULT_BUDGET_MS = 120_000;
 export type PaymentSnapshot = StatusSnapshot & { payment_id?: string };
 
 export interface PaymentOutcome<T extends PaymentSnapshot> {
-  status: string;
+  /** `completed`, or `finalizing` when the wait ended with the payout on chain but not final. */
+  status: "completed" | "finalizing";
   snapshot: T;
 }
 
 /**
- * Drive one submitted payment to a terminal outcome.
+ * Drive one submitted payment to `completed`, reporting the payout as soon as it is on chain.
  *
  * @param fetchStatus - reads the payment's current status
- * @returns the terminal snapshot
- * @throws if the payment failed terminally, is waiting on its refund, or was still settling
- *   when the budget ran out
+ * @returns the completed snapshot, or the `finalizing` one when the budget ran out first
+ * @throws if the payment failed terminally, is waiting on its refund, or had no payout on
+ *   chain when the budget ran out
  */
 export async function collectPayment<T extends PaymentSnapshot>(
   fetchStatus: () => Promise<T>,
-  options: CollectOptions = {},
+  options: CollectOptions<T> = {},
 ): Promise<PaymentOutcome<T>> {
-  const first = await fetchStatus();
+  const observed = async (): Promise<T> => {
+    const snapshot = await fetchStatus();
+    if (snapshot.status === "finalizing" || snapshot.status === "completed") options.onPayout?.(snapshot);
+    return snapshot;
+  };
+
+  const first = await observed();
   if (isTerminalStatus(first.status) || first.status === "refund_available") {
     return settleOrThrow(first);
   }
 
-  console.log(`  ⏳  still settling — waiting`);
+  console.log(first.status === "finalizing" ? `  ⏳  waiting for the payout to be final` : `  ⏳  still settling — waiting`);
   const outcome = await waitForStatus({
-    fetchStatus,
+    fetchStatus: observed,
     waitFor: "completed",
     budgetMs: options.budgetMs ?? DEFAULT_BUDGET_MS,
     intervalMs: options.intervalMs,
@@ -70,9 +80,12 @@ export async function collectPayment<T extends PaymentSnapshot>(
   });
 
   if (outcome.timedOut || !outcome.snapshot) {
+    const last = outcome.snapshot ?? first;
+    // Paid on chain, not yet final: the payout is real, so it is not reported as unpaid.
+    if (last.status === "finalizing") return { status: "finalizing", snapshot: last };
     throw new Error(
-      `payment was still settling when the wait budget ran out. It is not lost: ` +
-        `re-run this payment under the same request id to collect its outcome.`,
+      `payment ${last.payment_id ?? "(unidentified)"} was still settling when the wait budget ran ` +
+        `out. It is not lost: re-run this payment under the same request id to collect its outcome.`,
     );
   }
 

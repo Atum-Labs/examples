@@ -34,7 +34,12 @@ export const STUB_OUTCOMES: readonly StubOutcome[] = ["completed", "failed", "re
 export interface StubGatewayOptions {
   /** First N status checks report `pending`, then terminal (`settleAs`). Default: 0. */
   pendingAttempts?: number;
-  /** The status this payment ends in, once pendingAttempts is exhausted. Default: "completed". */
+  /**
+   * Then N status checks report `finalizing`, the payout on chain but not yet final, before
+   * the payment ends as `settleAs`. Applies to a payment that completes. Default: 0.
+   */
+  finalizingChecks?: number;
+  /** The status this payment ends in, once pendingAttempts and finalizingChecks are exhausted. Default: "completed". */
   settleAs?: StubOutcome;
 }
 
@@ -105,6 +110,14 @@ function terminalBody(replay: boolean, status: StubOutcome) {
 export function startStubGateway(options: StubGatewayOptions = {}): Promise<StubGateway> {
   const pendingAttempts = options.pendingAttempts ?? 0;
   const settleAs = options.settleAs ?? "completed";
+  const finalizingChecks = settleAs === "completed" ? (options.finalizingChecks ?? 0) : 0;
+  // The payout on chain, not yet final: it lists both transactions, as completed does.
+  const finalizing = (replay?: boolean) => ({
+    payment_id: STUB_PAYMENT_ID,
+    status: "finalizing",
+    ...(replay === undefined ? {} : { idempotent_replay: replay }),
+    transactions: STUB_TRANSACTIONS,
+  });
   const submitted: string[] = [];
   const submittedRequests: Record<string, unknown>[] = [];
   const payments = new Map<string, { requestId: string; statusChecks: number }>();
@@ -134,7 +147,9 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
             200,
             pendingAttempts > 0 && existing.statusChecks < pendingAttempts
               ? { payment_id: STUB_PAYMENT_ID, status: "pending", idempotent_replay: true }
-              : terminalBody(true, settleAs),
+              : existing.statusChecks < pendingAttempts + finalizingChecks
+                ? finalizing(true)
+                : terminalBody(true, settleAs),
           );
           return;
         }
@@ -145,7 +160,9 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
           200,
           pendingAttempts > 0
             ? { payment_id: STUB_PAYMENT_ID, status: "pending", idempotent_replay: false }
-            : terminalBody(false, settleAs),
+            : finalizingChecks > 0
+              ? finalizing(false)
+              : terminalBody(false, settleAs),
         );
         return;
       }
@@ -161,6 +178,10 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
         payment.statusChecks += 1;
         if (payment.statusChecks <= pendingAttempts) {
           send(res, 200, { payment_id: paymentId, status: "pending" });
+          return;
+        }
+        if (payment.statusChecks <= pendingAttempts + finalizingChecks) {
+          send(res, 200, finalizing());
           return;
         }
         const { idempotent_replay: _replay, quote_id: _quote, ...status } = terminalBody(false, settleAs);

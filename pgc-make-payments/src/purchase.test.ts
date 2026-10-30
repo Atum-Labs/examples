@@ -25,11 +25,13 @@ function statuses(...sequence: string[]): { fetchStatus: () => Promise<PaymentSn
 
 const FAST = { intervalMs: 5, budgetMs: 2_000 };
 
-test("waits past finalizing for completed", async () => {
+test("reports the payout as soon as it is finalizing, then waits for completed", async () => {
   const s = statuses("pending", "finalizing", "finalizing", "completed");
-  const outcome = await collectPayment(s.fetchStatus, FAST);
+  const payouts: string[] = [];
+  const outcome = await collectPayment(s.fetchStatus, { ...FAST, onPayout: (snap) => payouts.push(snap.status ?? "") });
   assert.equal(outcome.status, "completed");
   assert.equal(s.checks(), 4, "finalizing is not final; the wait must continue to completed");
+  assert.equal(payouts[0], "finalizing", "the payout is reported at the first answer that names it");
 });
 
 test("stops on refund_available, names the payment, and says not to pay again", async () => {
@@ -63,11 +65,18 @@ for (const terminal of ["failed", "refunded"]) {
   });
 }
 
-test("a payment still finalizing when the budget runs out is not lost", async () => {
-  const s = statuses("finalizing");
+test("a payout still finalizing when the budget runs out is reported as paid, not as unpaid", async () => {
+  const s = statuses("pending", "finalizing");
+  const outcome = await collectPayment(s.fetchStatus, { intervalMs: 5, budgetMs: 50 });
+  assert.equal(outcome.status, "finalizing");
+  assert.equal(outcome.snapshot.payment_id, PAYMENT_ID);
+});
+
+test("a payment with no payout when the budget runs out is not lost, and is named", async () => {
+  const s = statuses("pending");
   await assert.rejects(
     () => collectPayment(s.fetchStatus, { intervalMs: 5, budgetMs: 50 }),
-    /still settling when the wait budget ran out.*same request id/s,
+    new RegExp(`payment ${PAYMENT_ID} was still settling when the wait budget ran out.*same request id`, "s"),
   );
 });
 

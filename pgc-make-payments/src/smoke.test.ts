@@ -108,6 +108,23 @@ test("a payment that settles as failed surfaces as a terminal error, not a silen
   );
 });
 
+// The payout is shown as soon as it is on chain (finalizing), once, and the run still ends on
+// the final status. The submit answers pending, so the finalizing answers arrive during the wait.
+test("shows the payout while it is finalizing, then reports completed", async () => {
+  const result = await runClient({
+    ...STUB_ENV,
+    PRIVATE_KEY: randomPrivateKey(),
+    STUB_PENDING_ATTEMPTS: "1",
+    STUB_FINALIZING_CHECKS: "2",
+  });
+  assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
+  const notFinal = result.output.indexOf("payout on chain, not yet final (finalizing)");
+  const completed = result.output.indexOf("Status: completed");
+  assert.ok(notFinal !== -1, `expected the payout while finalizing:\n${result.output}`);
+  assert.ok(completed > notFinal, `expected Status: completed after the payout:\n${result.output}`);
+  assert.equal(result.output.match(/Payment settled\./g)?.length, 1, `the payout is shown once:\n${result.output}`);
+});
+
 // A payment waiting on its refund is not final: a late delivery can still complete it. The
 // payer must be told not to pay again, and how to reach the refund, by the payment's id.
 test("a payment waiting on its refund names the payment and says not to pay again", async () => {

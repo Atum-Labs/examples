@@ -288,11 +288,14 @@ function withoutGatewayUrl(message: string): string {
 }
 
 // Names an error the submitter could not classify without printing its message: the error's
-// type, and the HTTP status when there was one.
+// type, its code when it has one (ECONNREFUSED, ENOTFOUND, ...), and the HTTP status when
+// there was one. None of these carries the gateway URL.
 function describeUnknownError(err: unknown): string {
-  const { name, status } = (err ?? {}) as { name?: unknown; status?: unknown };
-  const type = typeof name === "string" && name !== "" ? name : "error";
-  return typeof status === "number" ? `${type}, HTTP ${status}` : type;
+  const { name, code, status } = (err ?? {}) as { name?: unknown; code?: unknown; status?: unknown };
+  const parts = [typeof name === "string" && name !== "" ? name : "error"];
+  if (typeof code === "string" && code !== "") parts.push(code);
+  if (typeof status === "number") parts.push(`HTTP ${status}`);
+  return parts.join(", ");
 }
 
 // Wrap a submitter so every outcome is legible in the merchant's log: the on-chain tx

@@ -58,10 +58,10 @@ function reattemptReason(problem: PaymentProblem, paymentId: string | undefined)
   if (typeof problem.code === "string") {
     return `the gateway could not take the payment (${problem.code}); nothing was charged`;
   }
-  if (problem.state === "refund_available" || problem.state === "refunding") {
+  if (problem.state === "refunding") {
     // Not final: a late delivery can still complete it, so this payer must not pay for the
     // same goods under a new purchase id while it waits.
-    return `payment ${paymentId} ${problem.state} — not delivered; its deposit is still in escrow`;
+    return `payment ${paymentId} refunding — not delivered; its deposit is being returned`;
   }
   return paymentId ? `still settling (payment ${paymentId})` : "not settled yet, and no payment is named yet";
 }
@@ -118,8 +118,8 @@ export function describeError(err: unknown): string {
  *   it, and resubmit. The purchase identifier comes from the URL, so every attempt names
  *   the same payment.
  * @returns the response that settled, or a non-402 response the merchant answered with
- * @throws if the payment failed terminally, was refused, or never settled in time, or the
- *   network failed MAX_CONSECUTIVE_NETWORK_ERRORS times in a row
+ * @throws if the payment failed terminally, was refused, is waiting on the payer's refund, or
+ *   never settled in time, or the network failed MAX_CONSECUTIVE_NETWORK_ERRORS times in a row
  */
 export async function payPurchase(
   attempt: () => Promise<Response>,
@@ -167,6 +167,19 @@ export async function payPurchase(
     }
 
     paymentId = problem.paymentId ?? paymentId;
+    // The refund waits on this payer: nobody else submits it, so re-attempting does not help.
+    // It is not spent either — a late delivery can still complete it — so paying again under a
+    // new purchase id could pay twice.
+    if (problem.state === "refund_available") {
+      throw new Error(
+        `payment ${paymentId ?? "(unidentified)"} is refund_available: nothing was delivered and ` +
+          `the deposit is still in escrow. Do not pay for these goods under a new purchase id ` +
+          `while it is refund_available — a late delivery can still complete it, and re-running ` +
+          `this purchase under the same identifier collects that. To return the funds, read its ` +
+          `refund_signature from GET /v1/payments/${paymentId ?? "{paymentId}"}/status on the ` +
+          `gateway and submit it to the source chain's escrow.`,
+      );
+    }
     if (i === maxAttempts) break;
     console.log(
       `  ⏳  ${reattemptReason(problem, paymentId)} — ${elapsed()} elapsed, ` +

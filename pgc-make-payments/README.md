@@ -22,13 +22,13 @@ Cross-chain settlement can take longer than the gateway holds a connection open 
 | Status | Meaning | What to do |
 | --- | --- | --- |
 | `pending` | Accepted, still settling | Wait, or re-submit the **same** `request_id` |
-| `finalizing` | The payout is on chain, not yet final | Wait for `completed` |
+| `finalizing` | The payout is on chain, not yet final | Wait for `completed`; it normally follows within seconds to minutes |
 | `completed` | Delivered | Done |
 | `refunding` | Not delivered; the deposit is being returned | Wait; it can still complete |
 | `refund_available` | Not delivered; the deposit is still in escrow | Do **not** pay again: a late delivery can still complete it. To return the funds, read `refund_signature` with `npx payment-status` and the payment id the run printed, and submit it to the source escrow |
 | `failed` / `refunded` | Terminal | That id is spent; the same corridor needs a **new** `request_id` |
 
-x402 and MPP collect a slow settlement by re-attempting the purchase (a fresh 402, a new signature). PGC has no 402. The SDK's collection mechanism is `waitForStatus` — the same helper behind `send-payment --wait` — which looks the payment up by `payment_id`; this example waits for `completed`. Re-submitting the same `request_id` also returns the current state, but it rebuilds and re-sends the payment to do so.
+x402 and MPP collect a slow settlement by re-attempting the purchase (a fresh 402, a new signature). PGC has no 402. The SDK's collection mechanism is `waitForStatus` — the same helper behind `send-payment --wait` — which looks the payment up by `payment_id`. This example shows the deposit and payout as soon as the payout is on chain (`finalizing`) and keeps waiting for `completed`. `npm run pay` exits `0` once the payment completes, and `5` if the wait ends with the payout on chain but not yet final, naming the payment to check with `npx payment-status`. Re-submitting the same `request_id` also returns the current state, but it rebuilds and re-sends the payment to do so.
 
 [`src/purchase.ts`](src/purchase.ts) waits:
 
