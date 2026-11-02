@@ -217,7 +217,7 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 
 ## Session token (optional)
 
-A session token identifies your wallet to the Payment Gateway. The gateway does not require one, so this mode is off by default. With `USE_SESSION_TOKEN=true`, every gateway call (prepare, submit and each status check) carries `Authorization: Bearer <token>`. [Session tokens](https://docs.atum.xyz/get-started/identity/session-tokens) explains what a session changes.
+A session token identifies your wallet to the Payment Gateway. The gateway does not require one, so this mode is off by default. With `USE_SESSION_TOKEN=true`, every gateway call (prepare, submit and each status check) carries the session token. [Session tokens](https://docs.atum.xyz/get-started/identity/session-tokens) explains what a session changes.
 
 The token comes from Atum's authorization service. The client signs a presentation of your Known to Atum credential that answers a single-use nonce, and exchanges it for a short-lived token. `createSessionTokenSource` from `@atumlabs/payment-gateway-client/signing` keeps the token current, and the client asks it for the session on every call:
 
