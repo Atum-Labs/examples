@@ -219,14 +219,16 @@ For **mainnet** (where authorized by Atum), the steps are identical with Atum-au
 
 A session token identifies your wallet to the Payment Gateway. The gateway does not require one, so this mode is off by default. With `USE_SESSION_TOKEN=true`, every gateway call (prepare, submit and each status check) carries `Authorization: Bearer <token>`. [Session tokens](https://docs.atum.xyz/get-started/identity/session-tokens) explains what a session changes.
 
-The token comes from Atum's authorization service. The client signs a presentation of your Known to Atum credential that answers a single-use nonce, and exchanges it for a short-lived token. `createSessionTokenSource` from `@atumlabs/payment-gateway-client/signing` keeps the token current, and the client asks it for the token on every call:
+The token comes from Atum's authorization service. The client signs a presentation of your Known to Atum credential that answers a single-use nonce, and exchanges it for a short-lived token. `createSessionTokenSource` from `@atumlabs/payment-gateway-client/signing` keeps the token current, and the client asks it for the session on every call:
 
 ```ts
 const session = createSessionTokenSource({ authUrl, credentials, signer: signerFromEthersWallet(wallet), onError });
-const client = new PaymentGatewayClient({ BASE: gatewayUrl, TOKEN: () => session.token() });
+const client = new PaymentGatewayClient({ BASE: gatewayUrl, session });
 ```
 
-**A stub run** needs nothing more: `USE_SESSION_TOKEN=true npm run pay` uses an in-process authorization service and a stub credential for the throwaway wallet, and ends by saying how many gateway calls carried the token. Add `STUB_AUTH_REFUSE=true` to see a payment go ahead without one.
+**The token is bound to a key the session holds** (DPoP, RFC 9449), so a copy of it is of no use without that key. Every call carries `Authorization: DPoP <token>` and a fresh `DPoP` proof for that call's method and URL. Where the authorization service doesn't bind tokens, the token is sent as `Bearer`. Use your environment's gateway URL as `BASE`: a proof names the URL it was made for.
+
+**A stub run** needs nothing more: `USE_SESSION_TOKEN=true npm run pay` uses an in-process authorization service and a stub credential for the throwaway wallet. The stub binds the token as the real service does, and the run ends by saying how many gateway calls carried it with a proof. Add `STUB_AUTH_REFUSE=true` to see a payment go ahead without one.
 
 **A real session** also needs:
 - `PRIVATE_KEY`: the wallet your Known to Atum credential is issued to. The same wallet pays.

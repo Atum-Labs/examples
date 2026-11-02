@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, createPublicKey, randomBytes, verify, type JsonWebKey } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ethers } from "ethers";
@@ -416,6 +416,16 @@ function sessionRun(gatewayUrl: string, authUrl: string): Record<string, string>
   };
 }
 
+// A DPoP proof's claims, after checking it is signed by the key in its own header.
+function verifiedProof(proof: string): { htm: string; htu: string; ath: string } {
+  const [h, p, sig] = proof.split(".");
+  const header = JSON.parse(Buffer.from(h, "base64url").toString("utf8")) as { jwk: JsonWebKey };
+  const key = createPublicKey({ key: header.jwk, format: "jwk" });
+  const ok = verify("sha256", Buffer.from(`${h}.${p}`), { key, dsaEncoding: "ieee-p1363" }, Buffer.from(sig, "base64url"));
+  assert.ok(ok, "the proof does not verify under the key in its own header");
+  return JSON.parse(Buffer.from(p, "base64url").toString("utf8")) as { htm: string; htu: string; ath: string };
+}
+
 test("a session run sends the token on prepare, submit and every status check", async () => {
   const gateway = await startStubGateway({ pendingAttempts: 1 });
   const auth = await startStubAuth();
@@ -427,8 +437,16 @@ test("a session run sends the token on prepare, submit and every status check", 
     assert.ok(calls.some((c) => c.call === "POST /v1/payments"), "expected a submit");
     assert.ok(calls.some((c) => /^GET \/v1\/payments\/.+\/status$/.test(c.call)), "expected a status check");
     assert.equal(auth.tokensIssued.length, 1, "one session covers the whole payment");
+    const token = auth.tokensIssued[0];
     for (const call of calls) {
-      assert.equal(call.authorization, `Bearer ${auth.tokensIssued[0]}`, `${call.call} went without the token`);
+      // Bound to the client's key: DPoP, with a proof made for this very call.
+      assert.equal(call.authorization, `DPoP ${token}`, `${call.call} went without the token`);
+      assert.ok(call.dpop, `${call.call} carried no proof`);
+      const claims = verifiedProof(call.dpop);
+      const [method, path] = call.call.split(" ");
+      assert.equal(claims.htm, method);
+      assert.equal(claims.htu, `${gateway.url}${path}`);
+      assert.equal(claims.ath, createHash("sha256").update(token).digest("base64url"));
     }
   } finally {
     await auth.close();
@@ -485,5 +503,5 @@ test("a stub session run says every gateway call carried the token", async () =>
   const result = await runClient({ ...STUB_ENV, USE_SESSION_TOKEN: "true", STUB_PENDING_ATTEMPTS: "1" });
   assert.equal(result.exitCode, 0, `client exited non-zero:\n${result.output}`);
   assert.match(result.output, /Session token for 0x[0-9a-fA-F]{40}, sent on every gateway call/);
-  assert.match(result.output, /(\d+) of \1 gateway calls carried the session token/);
+  assert.match(result.output, /(\d+) of \1 gateway calls carried the key-bound session token and a proof/);
 });

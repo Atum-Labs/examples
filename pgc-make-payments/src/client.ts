@@ -222,11 +222,12 @@ async function main(): Promise<void> {
       ? await startStubAuth({ refuse: process.env.STUB_AUTH_REFUSE === "true" })
       : undefined;
   const session = USE_SESSION_TOKEN ? sessionTokens(stubAuth) : undefined;
-  // TOKEN is asked for on every call, so prepare, submit and each status check send the current
-  // token. An empty answer sends no Authorization header.
+  // The session is asked for on every call, so prepare, submit and each status check send the
+  // current token: as `Authorization: DPoP` with a fresh proof when it is bound to the session's
+  // key, as `Bearer` when it is not, and not at all when none can be had.
   const client = new PaymentGatewayClient({
     BASE: gatewayUrl,
-    ...(session ? { TOKEN: () => session.token() } : {}),
+    ...(session ? { session } : {}),
   });
 
   try {
@@ -334,8 +335,8 @@ async function main(): Promise<void> {
     console.log(`Status: ${outcome.status}`);
     if (stub && session) {
       const calls = stub.calls();
-      const carried = calls.filter((c) => c.authorization?.startsWith("Bearer ")).length;
-      detail(`${carried} of ${calls.length} gateway calls carried the session token`);
+      const carried = calls.filter((c) => c.authorization?.startsWith("DPoP ") && c.dpop).length;
+      detail(`${carried} of ${calls.length} gateway calls carried the key-bound session token and a proof`);
     }
     if (outcome.status === "finalizing") {
       // Paid on chain, but the wait ended before its chain made the payout final. It normally

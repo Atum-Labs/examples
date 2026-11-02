@@ -117,13 +117,17 @@ export async function startStubAuth(options: StubAuthOptions = {}): Promise<Stub
         }
         const accessToken = `stub.${randomBytes(24).toString("base64url")}`;
         stub.tokensIssued.push(accessToken);
+        // A proof binds the token to the client's key, as the real service does where it binds
+        // tokens. The stub checks that one was sent for this exchange's nonce, not its signature.
+        const proof = req.headers.dpop;
+        const bound = typeof proof === "string" && proofNonce(proof) === challenge;
         send(
           res,
           200,
           {
             access_token: accessToken,
             issued_token_type: ACCESS_TOKEN_TYPE,
-            token_type: "Bearer",
+            token_type: bound ? "DPoP" : "Bearer",
             expires_in: STUB_TOKEN_LIFETIME_SECONDS,
           },
           { "Cache-Control": "no-store", Pragma: "no-cache" },
@@ -152,6 +156,18 @@ function send(res: ServerResponse, status: number, body: unknown, headers: Recor
 
 function refuse(res: ServerResponse, status: number, code: string, message: string): void {
   send(res, status, { code, message, domain: "AUTHORIZATION_SERVICE" }, { "Cache-Control": "no-store" });
+}
+
+// The nonce claim of a DPoP proof, read without verifying it: the stub only shows the shape.
+function proofNonce(proof: string): string | undefined {
+  try {
+    const claims = JSON.parse(Buffer.from(proof.split(".")[1] ?? "", "base64url").toString("utf8")) as {
+      nonce?: unknown;
+    };
+    return typeof claims.nonce === "string" ? claims.nonce : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readBody(req: IncomingMessage): Promise<string> {

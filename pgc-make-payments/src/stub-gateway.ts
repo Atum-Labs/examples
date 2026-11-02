@@ -58,6 +58,8 @@ export interface StubCall {
   /** Method and path, e.g. `POST /v1/payments`. */
   call: string;
   authorization: string | undefined;
+  /** The DPoP proof the call carried, if any. */
+  dpop: string | undefined;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -135,7 +137,11 @@ export function startStubGateway(options: StubGatewayOptions = {}): Promise<Stub
     void (async () => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const method = req.method ?? "GET";
-      calls.push({ call: `${method} ${url.pathname}`, authorization: req.headers.authorization });
+      calls.push({
+        call: `${method} ${url.pathname}`,
+        authorization: req.headers.authorization,
+        dpop: typeof req.headers.dpop === "string" ? req.headers.dpop : undefined,
+      });
 
       if (method === "GET" && url.pathname === "/v1/defaults") {
         const chainId = url.searchParams.get("chain_id") ?? "eip155:84532";
