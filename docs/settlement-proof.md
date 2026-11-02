@@ -121,7 +121,7 @@ Both protocols now behave the same way, because both rest on the same guarantee:
 | How the outcome is collected | The payer re-attempts the same purchase until it reaches a terminal outcome. | Identical. |
 | Naming the purchase | The payer supplies `paymentIdentifier`; it rides in the payment. **The merchant's API is unchanged.** | The merchant stamps `intentId` into the challenge, read from its own route (`/invoices/4711/pdf` already has it). |
 | Terminal failure | That identifier is spent for good; the same goods need a NEW one. | Identical. |
-| Delivering once | The merchant's own job: key fulfilment on the receipt's `payment_id`, never on the request. | Identical. |
+| Delivering once | The merchant's own job: key fulfilment on the payment id the receipt names, never on the request. | Identical. |
 
 **Takeaway:** settlement reliability is no longer a reason to prefer one protocol over the other — on the shipped Base ↔ Tempo corridor they settle at comparable speed (~25–40s per leg) and resolve a slow settlement the same way. Choose on integration shape: x402 asks nothing of your API, while MPP needs one value your route already carries.
 

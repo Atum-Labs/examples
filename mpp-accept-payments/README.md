@@ -14,7 +14,7 @@ The merchant gates a route (`GET /paid/<purchase id>`) behind payment. Unlike x4
 4. `mppx` calls this method's `verify()` — it checks the signature and terms locally, then hands the request to your `PaymentSubmitter`.
 5. The merchant returns `200 OK` with the protected resource and a `Payment-Receipt` header — or, if settlement is still in flight, a `402` telling the payer to re-attempt the same purchase.
 
-By default this example uses a **stub submitter** that returns a canned confirmation, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
+By default this example uses a **stub submitter** that returns a canned completed payment, so you can run the full flow locally without a gateway or funds. Point it at a real Atum Payment Gateway when you're ready to settle for real.
 
 ## Who does the payer trust?
 
@@ -84,16 +84,21 @@ This boots the merchant (in stub mode) and drives real payments against it using
 
 ## Settlement outcomes
 
-Cross-chain settlement can take longer than the gateway holds a connection open (~30s). The submitter this example provides **submits and returns what the gateway said — it does not poll for completion.** Polling would hold the payer's own HTTP request open for the whole settlement window (the classic proxy timeout) and would hide the pending state that makes the payer's re-attempt safe. Passing the gateway's `status` through is what lets `verify()` tell these three apart:
+Cross-chain settlement can take longer than the gateway holds a connection open (~30s). The submitter this example provides **submits and returns what the gateway said — it does not poll for completion.** Polling would hold the payer's own HTTP request open for the whole settlement window (the classic proxy timeout) and would hide the pending state that makes the payer's re-attempt safe. Passing the gateway's `status` through is what lets `verify()` tell these apart:
 
 | `verify()` outcome | What happened | What the payer should do |
 |---|---|---|
-| a receipt | Settled | Nothing; the resource is served |
-| `SettlementPendingError` | Accepted, still settling | **Re-attempt the same purchase** — it resolves onto this payment |
+| a receipt | The payout is on chain: `finalizing`, or `completed` once its chain has made it final | Nothing; the resource is served |
+| `SettlementPendingError` | Accepted and still settling, or the submission's outcome is unknown | **Re-attempt the same purchase** — it resolves onto this payment |
 | `SettlementFailedError` | Terminal failure | **A new payment, under a new purchase id** — this one can never settle |
+| `PaymentRetryableError` | The gateway could not take it this time; nothing charged | Re-attempt the same purchase shortly |
 | `PaymentRejectedError` | Refused; nothing charged | Fix the request and pay the same purchase again |
 
-Pending and failed demand **opposite** actions, so never collapse them into one "payment failed": reading pending as failed abandons a payment that was about to succeed and invites a second charge; reading failed as pending strands the payer retrying a dead payment. Both reach the payer as a `402` with problem details, distinguished by `type`, and both carry the gateway's `paymentId` as its own field for reconciliation.
+The submitter maps the gateway's refusals onto the last two with `gatewayRefusalOf`. Any other error — a timeout, a `5xx`, a dropped connection — leaves the outcome unknown, since the gateway may have taken the payment, so the submitter answers it as still settling: the payer's re-attempt under the same purchase id resolves onto that payment if it exists, where a failure would send the payer to pay again under a new one.
+
+**When to serve: `settleAt`.** This merchant passes `settleAt: "finalizing"` to `registerServer`, so it serves as soon as the payout is on chain. That is the fast path, and it accepts a risk: if a chain reorganization drops the payout before it is final, the payer is refunded and the resource was served unpaid. `settleAt: "completed"` waits until the payout's chain has made it final — seconds on some chains, minutes on others — and answers "still settling" until then. Choose by what you deliver: a report is cheap to serve twice, a shipment is not. The merchant's log marks a payout served before it was final: `settled — payment … (finalizing: payout on chain, not yet final)`.
+
+Pending and failed demand **opposite** actions, so never collapse them into one "payment failed": reading pending as failed abandons a payment that was about to succeed and invites a second charge; reading failed as pending strands the payer retrying a dead payment. Both reach the payer as a `402` with problem details, distinguished by `type`, and both carry the gateway's `paymentId` as its own field for reconciliation. A `PaymentRetryableError` shares the pending `type` and carries the gateway's `code` instead. A pending answer whose `state` is `refund_available` means the payment was not delivered and its refund waits on the payer, so re-attempting cannot change it: the example payer stops there and says how to return the deposit, and not to pay again under a new purchase id while a late delivery can still complete it.
 
 To watch it locally with no funds, start the merchant with `STUB_PENDING_ATTEMPTS=2`:
 
@@ -115,7 +120,7 @@ buildChargeChallenge(corridor, source, FULFILLMENT_AMOUNT, { intentId: purchaseI
 
 A request that names no purchase is refused with a `400` rather than served a challenge the payer would reject anyway.
 
-**Delivering once: your job.** A purchase identifier stops you being *paid* twice, not *delivering* twice: if a payer reuses one across two purchases, the second resolves onto the first payment and the gateway replays its receipt, so a merchant keying delivery on the request ships again. Key it on the receipt's `payment_id` instead — [`src/payments.ts`](src/payments.ts) shows the shape, and in production it is the payments table you already keep for reconciliation. It also makes an honest retry safe: a payer that never received the `200` is served the same result.
+**Delivering once: your job.** A purchase identifier stops you being *paid* twice, not *delivering* twice: if a payer reuses one across two purchases, the second resolves onto the first payment and the gateway replays its receipt, so a merchant keying delivery on the request ships again. Key it on the receipt's `paymentId` instead — [`src/payments.ts`](src/payments.ts) shows the shape, and in production it is the payments table you already keep for reconciliation. It also makes an honest retry safe: a payer that never received the `200` is served the same result.
 
 ## Going to testnet / mainnet
 
