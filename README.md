@@ -32,6 +32,7 @@ Set the stub flag to `false` to settle for real. All three examples ship pointed
 | --- | --- |
 | Payment Gateway (MPP + PGC settlement, x402 corridor defaults) | `https://payment-gw.production-testnet.atum.xyz` |
 | x402 facilitator | `https://payment-gw.production-testnet.atum.xyz/x402/v1` |
+| Authorization service (session tokens, `pgc-make-payments`) | `https://auth.production-testnet.atum.xyz` |
 
 Same host for x402/MPP, two values: the gateway hosts the x402 facilitator under a `/x402/v1` prefix, and that prefix is part of `FACILITATOR_URL`.
 

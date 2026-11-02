@@ -4,3 +4,5 @@ dist/
 .env.*
 !.env.example
 request.json
+# Your Known to Atum credential, if you keep it next to the app.
+credential.json
