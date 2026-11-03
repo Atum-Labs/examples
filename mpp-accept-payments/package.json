@@ -12,18 +12,19 @@
     "test:e2e": "tsx --test --test-name-pattern=real.e2e src/*.test.ts"
   },
   "dependencies": {
-    "@atumlabs/mppx-atum-escrow": "^0.7.0",
+    "@atumlabs/mppx-atum-escrow": "0.7.0",
     "@atumlabs/payment-gateway-client": "5.0.0",
     "mppx": "0.8.12",
-    "zod": "^4.4.3",
-    "dotenv": "^16.0.0"
+    "zod": "4.6.5",
+    "dotenv": "16.6.1"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "@types/node": "22.20.4",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
   },
   "overrides": {
-    "undici": "^6.28.0"
+    "undici": "6.29.0",
+    "viem": "2.56.8"
   }
 }
