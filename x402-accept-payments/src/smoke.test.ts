@@ -362,7 +362,7 @@ test("corridor overrides reach the 402 the merchant issues", async () => {
         accepts?: {
           network?: string;
           asset?: string;
-          extra?: { atum?: { destination?: { network?: string; asset?: string } } };
+          extra?: { atumResource?: string; atum?: { destination?: { network?: string; asset?: string } } };
         }[];
       };
       const offer = challenge.accepts?.[0];
@@ -370,6 +370,7 @@ test("corridor overrides reach the 402 the merchant issues", async () => {
 
       assert.equal(offer?.network, SOURCE_NETWORK, `the 402 must name the overridden source network:\n${shown}`);
       assert.equal(offer?.asset, SOURCE_ASSET, `the 402 must name the overridden source asset:\n${shown}`);
+      assert.equal(offer?.extra?.atumResource, "GET /paid", `the 402 must name the paid page:\n${shown}`);
       const destination = offer?.extra?.atum?.destination;
       assert.equal(destination?.network, DEST_NETWORK, `the 402 must name the overridden destination network:\n${shown}`);
       assert.equal(destination?.asset, DEST_ASSET, `the 402 must name the overridden destination asset:\n${shown}`);

@@ -120,10 +120,14 @@ interface PaymentRequirements {
       quoteDeadlineSeconds: number;
       fulfillmentDeadlineSeconds: number;
     };
-    // The page the payment is for ("GET /paid"). The payment is bound to it, so it cannot be spent on another page.
+    // The page the payment is for ("GET /paid"). Each paid route publishes its own string, including any
+    // query its response depends on, and sends this same offer to verify and settle.
     atumResource?: string;
   };
 }
+
+// An offer that leaves the merchant always names its page.
+type Offer = PaymentRequirements & { extra: { atumResource: string } };
 
 interface ResourceInfo {
   url: string;
@@ -135,7 +139,7 @@ interface ResourceInfo {
 interface PaymentRequired {
   x402Version: 2;
   resource: ResourceInfo; // required by the spec — describes the gated resource
-  accepts: PaymentRequirements[]; // one entry per payment option offered
+  accepts: Offer[]; // one entry per payment option offered
   extensions?: Record<string, unknown>; // see PAYMENT_IDENTIFIER below
   error?: string;
 }
@@ -154,7 +158,7 @@ interface PaymentPayload {
 interface FacilitatorRequest {
   x402Version: 2;
   paymentPayload: PaymentPayload;
-  paymentRequirements: PaymentRequirements;
+  paymentRequirements: Offer;
 }
 
 interface VerifyResponse {
@@ -406,7 +410,10 @@ function stubPaymentId(purchase: string): string {
 function stubFacilitator(): Facilitator {
   const attemptsByPurchase = new Map<string, number>();
   return {
-    async verify() {
+    async verify(body) {
+      if (!body.paymentRequirements.extra.atumResource) {
+        return { isValid: false, invalidReason: "missing extra.atumResource" };
+      }
       return { isValid: true, payer: "0x0000000000000000000000000000000000000000" };
     },
     async settle(body) {
@@ -558,8 +565,8 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       description: "Example premium resource",
     };
 
-    // Name this page in the offer, and send the same offer to verify and settle.
-    const offer: PaymentRequirements = {
+    // Name this page in the offer, and send the same offer to verify and settle. /paid ignores its query.
+    const offer: Offer = {
       ...requirements,
       extra: { ...requirements.extra, atumResource: `${req.method} ${req.path}` },
     };
