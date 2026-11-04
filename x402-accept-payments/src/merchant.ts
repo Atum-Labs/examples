@@ -120,6 +120,8 @@ interface PaymentRequirements {
       quoteDeadlineSeconds: number;
       fulfillmentDeadlineSeconds: number;
     };
+    // The page the payment is for ("GET /paid"). The payment is bound to it, so it cannot be spent on another page.
+    atumResource?: string;
   };
 }
 
@@ -556,12 +558,18 @@ function buildApp(requirements: PaymentRequirements): express.Express {
       description: "Example premium resource",
     };
 
+    // Name this page in the offer, and send the same offer to verify and settle.
+    const offer: PaymentRequirements = {
+      ...requirements,
+      extra: { ...requirements.extra, atumResource: `${req.method} ${req.path}` },
+    };
+
     // Every 402 this merchant issues asks the payer to name the purchase, so a payer that
     // knows nothing else about this scheme still learns an identifier is mandatory.
     const challengeOf = (error?: string): PaymentRequired => ({
       x402Version: 2,
       resource,
-      accepts: [requirements],
+      accepts: [offer],
       extensions: { [PAYMENT_IDENTIFIER]: PAYMENT_IDENTIFIER_DECLARATION },
       ...(error !== undefined ? { error } : {}),
     });
@@ -591,7 +599,7 @@ function buildApp(requirements: PaymentRequirements): express.Express {
     const facilitatorRequest: FacilitatorRequest = {
       x402Version: 2,
       paymentPayload,
-      paymentRequirements: requirements,
+      paymentRequirements: offer,
     };
 
     // Verify the credential — does not move funds.
