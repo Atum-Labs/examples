@@ -59,7 +59,7 @@ CI runs `scripts/check-host-literals.sh` and fails if a reachable `atum.network`
 
 ### Node.js
 
-**Node.js 20+** is the floor; CI covers 20, 22, and 24. On Node 20, MPP installs print `EBADENGINE` for a couple of transitive deps that declare `engines.node >= 22` — install and stub runs still succeed, and Node 22+ silences it. The x402 apps are unaffected.
+**Node.js 22+** is the floor; CI covers 22 and 24. Use a release with the Brotli fix for CVE-2026-111497: 22.23.4 or later on 22, 24.22.1 or later on 24.
 
 ### Run it
 

@@ -38,7 +38,6 @@ jobs:
         # validate lock files, so the npm major is the axis that actually
         # matters here; the Node version is how you select it.
         include:
-          - { node: '20', npm: '10' }
           - { node: '22', npm: '10' }
           - { node: '24', npm: '11' }
 
