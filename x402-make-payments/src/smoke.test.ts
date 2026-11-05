@@ -69,6 +69,7 @@ const CHALLENGE = {
           quoteDeadlineSeconds: 3,
           fulfillmentDeadlineSeconds: 120,
         },
+        atumResource: "GET /paid",
       },
     },
   ],
